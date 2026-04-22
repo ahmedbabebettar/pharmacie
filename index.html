@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="fr" dir="ltr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion de Pharmacie - Dialyse</title>
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&family=Inter:wght@400;600;800&display=swap"
+        rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- CSS -->
+    <link rel="stylesheet" href="text.css">
+    <!-- SheetJS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- html2pdf for PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script>
+        // Global Error Firewall: Catches syntax errors if app.js fails to load
+        window.addEventListener('error', function(e) {
+            console.error("Global Catch:", e.message);
+            // Ignore benign extension errors
+            if(e.message && e.message.includes('extension')) return; 
+            
+            let banner = document.getElementById('critical-error-banner');
+            if(!banner) {
+                banner = document.createElement('div');
+                banner.id = 'critical-error-banner';
+                banner.style = "position:fixed; top:0; left:0; width:100%; background:#ef4444; color:white; text-align:center; padding:10px; z-index:9999; font-weight:bold; font-family:sans-serif;";
+                document.body.prepend(banner);
+            }
+            banner.innerHTML = `⚠️ Erreur Critique Système : L'application n'a pas pu se charger correctement. <button onclick="window.location.reload(true)" style="margin-left:15px; padding:4px 8px; cursor:pointer;">Rafraîchir en profondeur (Ctrl+F5)</button>`;
+        });
+    </script>
+</head>
+
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-card glass-effect">
+            <div class="login-header">
+                <div class="brand-icon mx-auto"><i class="fa-solid fa-notes-medical"></i></div>
+                <h2 data-i18n="login_title">Connexion Responsable</h2>
+                <p data-i18n="login_subtitle">Gestion de Stock & Patients</p>
+            </div>
+            <form id="login-form" onsubmit="event.preventDefault(); if(typeof window.attemptLogin === 'function') { window.attemptLogin(); }">
+                <div class="form-group">
+                    <label data-i18n="login_user">Email Utilisateur</label>
+                    <input type="text" id="login-user" required placeholder="name@masef.com">
+                </div>
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label data-i18n="login_pass">Mot de passe</label>
+                    <input type="password" id="login-pass" required placeholder="123456">
+                </div>
+                <div id="login-error"
+                    style="color: var(--danger-red); font-size: 0.85rem; margin-bottom: 16px; display: none; text-align: center;"
+                    data-i18n="login_error">Identifiants incorrects!</div>
+                <button type="submit" class="primary-btn full-width" style="justify-content: center;"
+                    data-i18n="login_btn">Connexion</button>
+                <div style="margin-top: 15px; text-align: center;">
+                    <a href="#" onclick="window.forgotPassword()" style="font-size: 0.8rem; color: var(--primary-brand); text-decoration: none; font-weight: 600;" data-i18n="forgot_password">
+                        Mot de passe oublié ?
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App Layout -->
+    <div class="app-layout" id="main-app" style="display: none;">
+        <!-- Sidebar Navigation (Left side) -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-icon"><i class="fa-solid fa-plus"></i></div>
+                <div class="brand-text">
+                    <h2 data-i18n="brand_title">Gestion des Pharmacies</h2>
+                    <h2 data-i18n="brand_subtitle">MASEF</h2>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <!-- primary nav -->
+                <button class="nav-btn active" data-view="dashboard">
+                    <i class="fa-solid fa-table-cells-large"></i> <span data-i18n="nav_dashboard">Tableau de bord</span>
+                </button>
+                <button class="nav-btn" data-view="central">
+                    <i class="fa-solid fa-server"></i> <span data-i18n="nav_central">Stock Central</span>
+                </button>
+                <button class="nav-btn" data-view="distribution">
+                    <i class="fa-solid fa-truck-moving"></i> <span data-i18n="nav_distribution">Distribution</span>
+                </button>
+                <button class="nav-btn admin-only" data-view="admin_orders">
+                    <i class="fa-solid fa-cart-arrow-down"></i> <span data-i18n="nav_admin_orders">Commandes</span>
+                </button>
+                <button class="nav-btn" data-view="patients">
+                    <i class="fa-regular fa-user"></i> <span data-i18n="nav_patients">Patients</span>
+                </button>
+                <button class="nav-btn" data-view="records">
+                    <i class="fa-solid fa-clipboard-list"></i> <span data-i18n="nav_reports">Registres</span>
+                </button>
+                <button class="nav-btn" data-view="expired">
+                    <i class="fa-solid fa-calendar-xmark"></i> <span>Périmés</span>
+                </button>
+                <button class="nav-btn" data-view="reports">
+                    <i class="fa-solid fa-file-lines"></i> <span data-i18n="nav_history">Rapports</span>
+                </button>
+                <button class="nav-btn admin-only" data-view="admin_decharges">
+                    <i class="fa-solid fa-file-signature"></i> <span>Décharges (Historique)</span>
+                </button>
+                <div class="nav-divider" style="height:1px; background:#e5e7eb; margin:10px 0;"></div>
+                
+                <div class="nav-group-title" style="padding: 10px 20px; font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 800; letter-spacing: 1px;" data-pharmacy-only style="display:none;">Mon Registre</div>
+                <button class="nav-btn" data-view="pharm-inbox" data-pharmacy-only style="display:none;">
+                    <i class="fa-solid fa-inbox"></i> <span>Décharges</span>
+                </button>
+                <button class="nav-btn" data-view="pharm-order" data-pharmacy-only style="display:none;">
+                    <i class="fa-solid fa-cart-arrow-down"></i> <span>Approvisionnement</span>
+                </button>
+                <button class="nav-btn" data-view="pharm-dispense" data-pharmacy-only style="display:none;">
+                    <i class="fa-solid fa-hand-holding-medical"></i> <span>Délivrances</span>
+                </button>
+                <div class="nav-divider" data-pharmacy-only style="height:1px; background:#e5e7eb; margin:10px 0; display:none;"></div>
+
+                <div id="dynamic-pharmacies-sidebar"></div>
+                <!-- UPDATED: Analytical Reports for Admin -->
+                <button class="nav-btn admin-only" data-view="analytical_reports">
+                    <i class="fa-solid fa-chart-line"></i> <span data-i18n="nav_analyses">Analyses & Rapports</span>
+                </button>
+                <button class="nav-btn admin-only" data-view="manage_pharmacies">
+                    <i class="fa-solid fa-hospital-user"></i> <span>Gérer les Pharmacies</span>
+                </button>
+                <button class="nav-btn admin-only" data-view="users">
+                    <i class="fa-solid fa-users-gear"></i> <span>Gérer les Utilisateurs</span>
+                </button>
+                <!-- NEW: Register for Pharmacy -->
+                <button class="nav-btn pharmacy-only" data-view="my_register">
+                    <i class="fa-solid fa-book-medical"></i> <span data-i18n="nav_my_register">Mon Registre</span>
+                </button>
+            </nav>
+
+            <div class="user-profile-sidebar">
+                <div class="user-avatar">
+                    <i class="fa-solid fa-circle-user fa-2x"></i>
+                    <div class="user-info">
+                        <strong id="display-user-name">-</strong>
+                        <span id="display-user-role">-</span>
+                        <button class="settings-mini-btn" onclick="window.openRecoveryModal()" title="Sécurité du compte">
+                            <i class="fa-solid fa-shield-halved"></i> <span data-i18n="secure_account">Sécuriser</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content (Right side) -->
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-content">
+                    <h1 id="page-title">Dashboard</h1>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div id="sync-status-indicator" class="sync-status" title="État de la connexion">
+                            <i class="fa-solid fa-cloud"></i> <span id="sync-stat-text">Prêt</span>
+                        </div>
+                        <div class="date-display" id="date-display">8 Avril 2026</div>
+                    </div>
+                </div>
+            </header>
+
+            <div id="view-container" class="view-container">
+                <!-- Content injected by app.js -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Add Medicine Modal -->
+    <div id="add-medicine-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 data-i18n="add_med_title">Ajouter Médicament (Stock Central)</h3>
+                <button class="close-modal" onclick="document.getElementById('add-medicine-modal').classList.remove('active')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="add-medicine-form">
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label data-i18n="add_med_name">Nom du médicament</label>
+                    <input type="text" id="med-name" list="med-names-datalist" required>
+                    <datalist id="med-names-datalist"></datalist>
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label data-i18n="add_med_batch">Numéro de lot</label>
+                    <input type="text" id="med-batch" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label data-i18n="add_med_qty">Quantité reçue</label>
+                    <input type="number" id="med-qty" min="1" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label data-i18n="add_med_entry">Date d'entrée</label>
+                    <input type="date" id="med-entry" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label data-i18n="add_med_expiry">Date d'expiration</label>
+                    <input type="date" id="med-expiry" required>
+                </div>
+                <button type="submit" class="primary-btn full-width" style="justify-content: center;"
+                    data-i18n="add_med_btn">Ajouter</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Account Recovery Modal -->
+    <div id="recovery-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 data-i18n="recovery_title">Sécuriser mon compte</h3>
+                <button class="close-modal" onclick="document.getElementById('recovery-modal').classList.remove('active')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px;">
+                Liez votre compte à un email ou téléphone personnel pour pouvoir le récupérer en cas de perte.
+            </p>
+            <form id="recovery-form">
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>Email de récupération</label>
+                    <input type="email" id="recov-email" placeholder="mon-email@gmail.com">
+                </div>
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label>Téléphone de secours</label>
+                    <input type="tel" id="recov-phone" placeholder="+213 ...">
+                </div>
+                <button type="submit" class="primary-btn full-width" style="justify-content: center; background: var(--accent-green);">
+                    <i class="fa-solid fa-link"></i> Enregistrer les informations
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Custom Dialog Modal (Alert/Prompt replacement) -->
+    <div id="custom-dialog-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 340px; text-align: center; padding: 24px;">
+            <div id="dialog-icon" style="font-size: 2.5rem; margin-bottom: 16px; color: var(--primary-brand);">
+                <i class="fa-solid fa-circle-question"></i>
+            </div>
+            <h3 id="dialog-title" style="margin-bottom: 10px; font-size: 1.1rem;">Message</h3>
+            <p id="dialog-msg" style="color: var(--text-muted); margin-bottom: 20px; font-size: 0.85rem; line-height: 1.4;">...</p>
+            
+            <div id="dialog-input-container" style="display: none; margin-bottom: 20px;">
+                <input type="text" id="dialog-input" style="text-align: center; border-width: 2px; padding: 8px;">
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button id="dialog-cancel-btn" class="primary-btn" style="background: #f1f5f9; color: #64748b; font-size: 0.8rem; padding: 8px 16px;">Annuler</button>
+                <button id="dialog-confirm-btn" class="primary-btn" style="font-size: 0.8rem; padding: 8px 16px;">Confirmer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core App Logic -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js?v=2"></script>
+</body>
+
+</html>
