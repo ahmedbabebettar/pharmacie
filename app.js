@@ -708,7 +708,7 @@ window.attemptLogin = async function() {
             document.getElementById('main-app').style.display = 'flex';
             
             // Load data from Supabase immediately after login
-            loadDataFromSupabase();
+            await loadDataFromSupabase();
 
             document.querySelectorAll('.nav-btn, .nav-group-title, .nav-divider').forEach(el => {
                 if(el.hasAttribute('data-pharmacy-only')) {
