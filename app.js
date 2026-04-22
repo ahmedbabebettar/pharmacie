@@ -134,7 +134,11 @@ let activeReportTab = 'week';
 
 const hardcodedUsers = {
     'admin@masef.com': { pass: '123456', role: 'admin', name: { ar: 'المدير المركزي', fr: 'Directeur Central' } },
-    'stock@masef.com': { pass: '123456', role: 'manager', name: { ar: 'المخزون المركزي', fr: 'Stock Central' } }
+    'stock@masef.com': { pass: '123456', role: 'manager', name: { ar: 'المخزون المركزي', fr: 'Stock Central' } },
+    'ahmed@masef.com': { pass: '123456', role: 'pharmacy', pharmacyId: 1, name: { ar: 'أحمد', fr: 'Ahmed' } },
+    'samir@masef.com': { pass: '123456', role: 'pharmacy', pharmacyId: 2, name: { ar: 'سمير', fr: 'Samir' } },
+    'yousef@masef.com': { pass: '123456', role: 'pharmacy', pharmacyId: 3, name: { ar: 'يوسف', fr: 'Yousef' } },
+    'omar@masef.com': { pass: '123456', role: 'pharmacy', pharmacyId: 4, name: { ar: 'عمر', fr: 'Omar' } }
 };
 
 window.userDatabase = { ...hardcodedUsers };
