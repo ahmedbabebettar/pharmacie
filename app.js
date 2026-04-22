@@ -145,6 +145,10 @@ window.userDatabase = { ...hardcodedUsers };
 let currentUser = null;
 let currentUserEmail = null;
 
+// Promise that resolves when users are loaded from Supabase
+let usersReadyResolve;
+window.usersReady = new Promise(resolve => { usersReadyResolve = resolve; });
+
 // --- Global Sync Status Manager ---
 window.updateSyncStatus = function(status, msg) {
     const indicator = document.getElementById('sync-status-indicator');
@@ -687,6 +691,13 @@ document.addEventListener('DOMContentLoaded', () => {
 window.attemptLogin = async function() {
     try {
         console.log("Login Attempted!");
+        
+        // Wait for Supabase user sync to complete before validating
+        const loginBtn = document.querySelector('#login-form button[type="submit"]');
+        if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'Chargement...'; }
+        await window.usersReady;
+        if (loginBtn) { loginBtn.disabled = false; loginBtn.setAttribute('data-i18n','login_btn'); loginBtn.innerText = t('login_btn'); }
+
         window.showToast("C'est en cours...", "success");
 
         let email = document.getElementById('login-user').value.toLowerCase().trim();
@@ -3272,5 +3283,11 @@ window.handlePhotoUpload = async function(event, receiptId) {
 if (_supabase) {
     syncUsers().then(() => {
         console.log("App ready. Users loaded:", Object.keys(window.userDatabase).length);
+        if (typeof usersReadyResolve === 'function') usersReadyResolve();
+    }).catch(() => {
+        // Even on error, resolve so login doesn't block forever
+        if (typeof usersReadyResolve === 'function') usersReadyResolve();
     });
+} else {
+    if (typeof usersReadyResolve === 'function') usersReadyResolve();
 }
