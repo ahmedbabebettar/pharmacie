@@ -1642,6 +1642,12 @@ window.renderView = function(viewName) {
     else if (viewName === 'users') {
         if(currentUser.role !== 'admin') { window.renderView('dashboard'); return; }
         pageTitle.innerText = "Gestion des Utilisateurs";
+
+        // Always sync from Supabase first, then re-render
+        syncUsers().then(() => {
+            if (activeView === 'users') window.renderView('users');
+        });
+
         const users = Object.keys(window.userDatabase).map(email => ({ email, ...window.userDatabase[email] }));
 
         content = `
