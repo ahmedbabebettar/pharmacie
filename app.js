@@ -479,10 +479,18 @@ async function loadDataFromSupabase() {
         });
 
         // Map Orders
-        state.orders = ords_data.data.map(o => ({
+        state.orders = ords.data.map(o => ({
             id: o.id, date: o.date, pharmacyId: o.pharmacy_id, 
             workerName: o.worker_name, status: o.status, items: o.items 
         }));
+
+        // Map Counters
+        if (counters && counters.data) {
+            counters.data.forEach(c => {
+                if (c.id === 'delivery') state.counters.delivery = c.value;
+                if (c.id === 'order') state.counters.order = c.value;
+            });
+        }
 
         // Map Receipts
         state.receipts = (remoteReceipts && remoteReceipts.data) ? remoteReceipts.data : (JSON.parse(localStorage.getItem('local_receipts')) || []);
