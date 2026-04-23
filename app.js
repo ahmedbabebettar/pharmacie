@@ -1281,6 +1281,7 @@ window.renderView = function(viewName) {
                     </table>
                 </div>
             </div>`;
+        }
 
         content = `
             ${ordersHtml}
