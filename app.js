@@ -550,7 +550,7 @@ window.getNextCounterValue = async function(type) {
         state.counters[type] = newValue;
         
         const prefix = type === 'delivery' ? 'BL' : 'BC';
-        return `${prefix}-${newValue.toString().padStart(4, '0')}`;
+        return `${prefix}-${newValue.toString().padStart(6, '0')}`;
     } catch (err) {
         console.error("Counter error:", err);
         return (type === 'delivery' ? 'TRN-' : 'CMD-') + new Date().getTime().toString().slice(-6);
