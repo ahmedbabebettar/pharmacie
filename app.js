@@ -1254,14 +1254,15 @@ window.renderView = function(viewName) {
         pageTitle.innerText = t('page_central');
 
         const pendingOrders = (state.orders || []).filter(o => o.status === 'PENDING');
-        let ordersHtml = `
+        let ordersHtml = '';
+        if (pendingOrders.length > 0) {
+            ordersHtml = `
             <div class="dash-row" style="margin-bottom:20px;">
                 <div class="dash-col" style="flex:1; border:2px solid var(--highlight-gold); min-height: auto;">
                     <div class="block-title" style="color:var(--highlight-gold);">
                         <i class="fa-solid fa-cart-shopping"></i> 
                         ${currentLang === 'ar' ? 'طلبات التموين (Bon de Commande)' : 'Commandes en attente (Bon de Commande)'}
                     </div>
-                    ${pendingOrders.length > 0 ? `
                     <table style="font-size: 0.8rem;">
                         <thead><tr><th>Réf</th><th>Pharmacie</th><th>Date</th><th>Action</th></tr></thead>
                         <tbody>
