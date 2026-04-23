@@ -480,9 +480,9 @@ async function loadDataFromSupabase() {
 
         // Map Receipts
         state.receipts = (remoteReceipts && remoteReceipts.data) ? remoteReceipts.data : (JSON.parse(localStorage.getItem('local_receipts')) || []);
-        state.orders = ords.data || [];
 
         // Update medicine name suggestions for the "Add Medicine" modal
+
         const uniqueNames = [...new Set(state.medicines.map(m => m.name))].sort();
         const medDatalist = document.getElementById('med-names-datalist');
         if (medDatalist) {
@@ -1018,11 +1018,12 @@ window.renderView = function(viewName) {
 
         const pharmItems = Object.keys(state.pharmacies).map(k => {
             const p = state.pharmacies[k];
+            if (!p || !p.name) return '';
             return `
             <div class="pharm-prog-item">
                 <div class="pharm-prog-top">
-                    <span>${p.name.fr}</span>
-                    <span>${p.percent}%</span>
+                    <span>${p.name.fr || p.name.ar || 'Pharmacie'}</span>
+                    <span>${p.percent || 0}%</span>
                 </div>
                 <div class="pharm-prog-bar-bg">
                     <div class="pharm-prog-bar-fill" style="width: ${p.percent}%; background-color: ${p.color};"></div>
@@ -1044,7 +1045,7 @@ window.renderView = function(viewName) {
                         <tbody>
                             ${state.pendingReturns.map(req => `
                             <tr>
-                                <td>${state.pharmacies[req.pharmacyId].name.fr}</td>
+                                <td>${state.pharmacies[req.pharmacyId]?.name?.fr || 'Pharmacie #'+req.pharmacyId}</td>
                                 <td><strong>${req.medName}</strong></td>
                                 <td><span class="status-badge warning">${req.qty}</span></td>
                                 <td>${window.parseWorkerName(req.workerName, 'fr')}</td>
@@ -1073,7 +1074,7 @@ window.renderView = function(viewName) {
                             ${pendingOrders.map(o => `
                             <tr>
                                 <td><strong>#${o.id}</strong></td>
-                                <td>${state.pharmacies[o.pharmacyId].name.fr}</td>
+                                <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
                                 <td>${o.workerName}</td>
                                 <td>${new Date(o.date).toLocaleDateString('fr-FR')}</td>
                                 <td>
@@ -1448,6 +1449,9 @@ window.renderView = function(viewName) {
     else if (viewName === 'admin_orders' && currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
         pageTitle.innerText = "Gestion des Commandes";
         
+        // Auto-sync orders from Supabase every time this view is opened
+        loadDataFromSupabase();
+
         const pendingOrders = (state.orders || []).filter(o => o.status === 'PENDING').slice().reverse();
         const treatedOrders = (state.orders || []).filter(o => o.status === 'TREATED').slice().reverse();
 
@@ -1462,8 +1466,8 @@ window.renderView = function(viewName) {
                                 ${pendingOrders.length > 0 ? pendingOrders.map(o => `
                                 <tr>
                                     <td><strong>#${o.id}</strong></td>
-                                    <td>${state.pharmacies[o.pharmacyId].name.fr}</td>
-                                    <td>${o.workerName}</td>
+                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
+                                    <td>${o.workerName || '---'}</td>
                                     <td>${formatDate(o.date)}</td>
                                     <td>
                                         <button class="primary-btn" style="padding:4px 8px; font-size:12px; background:var(--info-blue); margin-right:5px;" onclick="window.downloadSavedReceipt('${o.id}')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
@@ -1488,8 +1492,8 @@ window.renderView = function(viewName) {
                                 <tr>
                                     <td>${formatDate(o.date)}</td>
                                     <td><strong>#${o.id}</strong></td>
-                                    <td>${state.pharmacies[o.pharmacyId].name.fr}</td>
-                                    <td>${o.workerName}</td>
+                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
+                                    <td>${o.workerName || '---'}</td>
                                     <td>
                                         <button class="icon-btn" style="color:var(--danger-red);" onclick="window.downloadSavedReceipt('${o.id}')" title="Télécharger PDF"><i class="fa-solid fa-file-pdf"></i></button>
                                     </td>
@@ -2622,16 +2626,35 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
             }
 
             const barcode = "CMD-" + new Date().getTime().toString().slice(-6);
-            const workerName = currentUser ? (typeof currentUser.name === 'object' ? currentUser.name.fr : currentUser.name) : 'Pharmacien';
-            
+            // Build worker name safely with multiple fallbacks
+            let workerName = '---';
+            if (currentUser) {
+                if (typeof currentUser.name === 'object' && currentUser.name) {
+                    workerName = currentUser.name.fr || currentUser.name.ar || currentUser.email || 'Pharmacien';
+                } else if (typeof currentUser.name === 'string' && currentUser.name) {
+                    workerName = currentUser.name;
+                } else {
+                    workerName = currentUser.email || 'Pharmacien';
+                }
+            }
+            // Ensure pharmId is always valid
+            const safePharmId = pharmId || (currentUser && currentUser.pharmacyId);
+            if (!safePharmId) {
+                await window.showCustomDialog({ title: "Erreur", msg: "Impossible d'identifier la pharmacie. Veuillez vous reconnecter.", icon: "fa-circle-xclamation" });
+                return;
+            }
+
             try {
-                await _supabase.from('orders').insert([{
+                const { error: insertError } = await _supabase.from('orders').insert([{
+                    id: barcode,
                     date: new Date().toISOString(),
-                    pharmacy_id: pharmId,
+                    pharmacy_id: safePharmId,
                     worker_name: workerName,
                     status: 'PENDING',
                     items: items
                 }]);
+                
+                if (insertError) throw insertError;
                 
                 await loadDataFromSupabase();
                 await window.showCustomDialog({ title: "Succès", msg: "Votre Bon de Commande a été envoyé avec succès au Stock Central.", icon: "fa-circle-check" });
@@ -2639,7 +2662,7 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
                 window.renderPharmacy(pharmId, 'pharm-order');
             } catch (err) {
                 console.error(err);
-                await window.showCustomDialog({ title: "Erreur", msg: "Erreur lors de l'enregistrement de la commande.", icon: "fa-circle-xclamation" });
+                await window.showCustomDialog({ title: "Erreur", msg: "Erreur lors de l'enregistrement de la commande: " + (err.message || err),  icon: "fa-circle-xclamation" });
             }
         });
     }
@@ -2809,10 +2832,24 @@ window.deleteSelectedPatients = async function() {
 
 // Export Utilities
 window.downloadSavedReceipt = async function(receiptId) {
+    // First try state.receipts
     const rcpt = state.receipts.find(r => r.id === receiptId);
     if(rcpt) {
         await window.autoDownloadReceipt(rcpt.type, rcpt.targetName, rcpt.items, rcpt.id, rcpt.date, rcpt.workerName);
+        return;
     }
+    
+    // Fallback: try state.orders (for order PDFs from admin panel)
+    const order = state.orders.find(o => o.id === receiptId || String(o.id) === String(receiptId));
+    if(order) {
+        const pharmName = (state.pharmacies[order.pharmacyId]?.name?.fr) 
+            || (state.pharmacies[order.pharmacyId]?.name?.ar)
+            || `Pharmacie #${order.pharmacyId}`;
+        await window.autoDownloadReceipt('COMMANDE', pharmName, order.items || [], order.id, order.date, order.workerName || '---');
+        return;
+    }
+    
+    await window.showCustomDialog({ title: "Introuvable", msg: "Le document PDF est introuvable. Il a peut-être été supprimé.", icon: "fa-circle-exclamation" });
 };
 
 
@@ -3297,3 +3334,84 @@ if (_supabase) {
 } else {
     if (typeof usersReadyResolve === 'function') usersReadyResolve();
 }
+
+// =============================================
+// REAL-TIME: Listen for new orders from pharmacies
+// =============================================
+if (_supabase) {
+    _supabase
+        .channel('orders-realtime')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, async (payload) => {
+            // Only notify admin/manager accounts
+            if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
+
+            const newOrder = payload.new;
+            const pharmName = (state.pharmacies[newOrder.pharmacy_id] && state.pharmacies[newOrder.pharmacy_id].name)
+                ? state.pharmacies[newOrder.pharmacy_id].name.fr
+                : `Pharmacie #${newOrder.pharmacy_id}`;
+
+            // Show toast notification
+            window.showToast(`🛒 Nouveau Bon de Commande de ${pharmName} !`, 'warning');
+
+            // Play a subtle notification sound (if browser allows)
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = ctx.createOscillator();
+                const gainNode = ctx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(ctx.destination);
+                oscillator.frequency.value = 880;
+                gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+                oscillator.start(ctx.currentTime);
+                oscillator.stop(ctx.currentTime + 0.5);
+            } catch(e) { /* Sound not supported */ }
+
+            // Reload data and refresh dashboard silently
+            await loadDataFromSupabase();
+        })
+        .subscribe((status) => {
+            console.log('Realtime subscription status:', status);
+        });
+}
+
+// =============================================
+// POLLING FALLBACK: Check for new orders every 30s
+// (Works even if Realtime WebSocket fails)
+// =============================================
+let lastKnownOrderCount = 0;
+
+function playNotificationSound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        oscillator.frequency.value = 880;
+        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + 0.5);
+    } catch(e) {}
+}
+
+setInterval(async () => {
+    // Only poll if admin/manager is logged in
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
+    if (!_supabase) return;
+
+    try {
+        const { data } = await _supabase.from('orders').select('id').eq('status', 'PENDING');
+        const currentCount = data ? data.length : 0;
+
+        if (currentCount > lastKnownOrderCount && lastKnownOrderCount !== 0) {
+            const diff = currentCount - lastKnownOrderCount;
+            window.showToast(`🛒 ${diff} nouveau(x) Bon(s) de Commande en attente !`, 'warning');
+            playNotificationSound();
+            await loadDataFromSupabase();
+        }
+        lastKnownOrderCount = currentCount;
+    } catch(e) { /* Polling failed silently */ }
+}, 30000); // Every 30 seconds
+
