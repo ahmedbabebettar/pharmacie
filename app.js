@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 22 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 23 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -3199,7 +3199,11 @@ window.toggleAllMeds = function(source) {
 window.deleteSelectedMeds = async function() {
     const selected = Array.from(document.querySelectorAll('.med-checkbox:checked')).map(cb => parseInt(cb.value));
     if(selected.length === 0) return;
-    const confirm = await window.showCustomDialog({ title: "Suppression Groupée", msg: `Supprimer ${selected.length} médicaments sélectionnés ?`, type: 'confirm', icon: 'fa-trash-can' });
+    
+    const title = currentLang === 'ar' ? "حذف جماعي" : "Suppression Groupée";
+    const msg = currentLang === 'ar' ? `هل أنت متأكد من حذف ${selected.length} دواء محدد؟` : `Supprimer ${selected.length} médicaments sélectionnés ?`;
+    
+    const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-trash-can' });
     if(confirm) {
         try {
             await _supabase.from('medicines').delete().in('id', selected);
@@ -3216,7 +3220,11 @@ window.toggleAllPatients = function(source) {
 window.deleteSelectedPatients = async function() {
     const selected = Array.from(document.querySelectorAll('.patient-checkbox:checked')).map(cb => parseInt(cb.value));
     if(selected.length === 0) return;
-    const confirm = await window.showCustomDialog({ title: "Suppression Groupée", msg: `Supprimer ${selected.length} patients sélectionnés ?`, type: 'confirm', icon: 'fa-user-minus' });
+    
+    const title = currentLang === 'ar' ? "حذف جماعي" : "Suppression Groupée";
+    const msg = currentLang === 'ar' ? `هل أنت متأكد من حذف ${selected.length} مريض محدد؟` : `Supprimer ${selected.length} patients sélectionnés ?`;
+    
+    const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-user-minus' });
     if(confirm) {
         try {
             await _supabase.from('patients').delete().in('id', selected);
