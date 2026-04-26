@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 15 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 20 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -466,7 +466,7 @@ async function loadDataFromSupabase() {
         state.dispensations = disps.data.map(d => ({
             id: d.id, date: d.date.split('T')[0], patientName: d.patient_name, 
             medName: d.medicine_name, qty: d.qty, pharmacyId: d.pharmacy_id, 
-            dispensedBy: d.dispensed_by
+            dispensedBy: d.dispensed_by, reference: d.reference
         }));
 
         // Map Patients
@@ -489,6 +489,7 @@ async function loadDataFromSupabase() {
             counters.data.forEach(c => {
                 if (c.id === 'delivery') state.counters.delivery = c.value;
                 if (c.id === 'order') state.counters.order = c.value;
+                if (c.id === 'dispense') state.counters.dispense = c.value;
             });
         }
 
@@ -524,6 +525,119 @@ async function loadDataFromSupabase() {
     }
 }
 
+// Helper for date cleaning during import
+window.cleanDateForImport = function(val) {
+    if (!val || String(val).trim() === '' || String(val).trim() === '-') return null;
+    if (typeof val === 'number') {
+        // Excel serial date
+        const d = new Date((val - (25567 + 2)) * 86400 * 1000);
+        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    }
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+};
+
+window.importPharmacyStock = async function(event, pharmId) {
+    const file = event.target.files[0];
+    if(!file) return;
+    
+    window.showToast("Importation en cours...", "info");
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+        try {
+            const data = evt.target.result;
+            const workbook = XLSX.read(data, {type: 'binary'});
+            const firstSheet = workbook.SheetNames[0];
+            const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
+            
+            const processedRows = [];
+            for (const r of rows) {
+                let name = '', batch = '', expiry = null, qty = 0;
+                for (let k in r) {
+                    let key = k.trim().toLowerCase();
+                    let val = r[k];
+                    if (key.includes('med') || key.includes('دواء') || key.includes('nom') || key.includes('name') || key.includes('الاسم')) name = String(val).trim();
+                    else if (key.includes('lot') || key.includes('batch') || key.includes('دفعة') || key.includes('تشغيل')) batch = String(val).trim();
+                    else if (key.includes('exp') || key.includes('صلاح') || key.includes('انتهاء') || key.includes('perem')) expiry = window.cleanDateForImport(val);
+                    else if (key.includes('qty') || key.includes('كمي') || key.includes('quant') || key.includes('qte')) qty = parseInt(val) || 0;
+                }
+                if (name) {
+                    processedRows.push({ name, batch, expiry, qty });
+                }
+            }
+
+            if (processedRows.length === 0) {
+                window.showToast("Aucun médicament valide trouvé.", "error");
+                return;
+            }
+
+            let successCount = 0;
+            const stockToUpsert = [];
+
+            for (const row of processedRows) {
+                // 1. Try to find medicine in central stock
+                let med = state.medicines.find(m => 
+                    m.name.toLowerCase() === row.name.toLowerCase() && 
+                    (row.batch === '' || m.batch.toLowerCase() === row.batch.toLowerCase())
+                );
+
+                let medicineId;
+                if (med) {
+                    medicineId = med.id;
+                } else {
+                    // 2. Auto-create if not found
+                    const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
+                        name: row.name,
+                        batch: row.batch || 'N/A',
+                        expiry: row.expiry,
+                        qty: 0, // In central stock it is 0
+                        entry_date: new Date().toISOString().split('T')[0]
+                    }]).select();
+                    
+                    if (medErr) {
+                        console.error("Error creating med:", row.name, medErr);
+                        continue;
+                    }
+                    medicineId = newMed[0].id;
+                    // Update local state temporarily to avoid duplicate creation in this loop
+                    state.medicines.push({
+                        id: medicineId,
+                        name: row.name,
+                        batch: row.batch || 'N/A',
+                        expiry: row.expiry,
+                        qty: 0
+                    });
+                }
+
+                stockToUpsert.push({
+                    pharmacy_id: pharmId,
+                    medicine_id: medicineId,
+                    qty: row.qty
+                });
+            }
+
+            // 3. Upsert into pharmacy_stock
+            if (stockToUpsert.length > 0) {
+                const { error: upsertErr } = await _supabase
+                    .from('pharmacy_stock')
+                    .upsert(stockToUpsert, { onConflict: 'pharmacy_id,medicine_id' });
+                
+                if (upsertErr) throw upsertErr;
+                
+                successCount = stockToUpsert.length;
+                await loadDataFromSupabase();
+                window.showToast(`${successCount} articles importés avec succès!`);
+                window.renderPharmacy(pharmId, 'all');
+            }
+
+        } catch (err) {
+            console.error("Import error:", err);
+            window.showToast("Erreur lors de l'importation", "error");
+        }
+    };
+    reader.readAsBinaryString(file);
+};
+
 // =============================================
 // COUNTER LOGIC
 // =============================================
@@ -549,11 +663,18 @@ window.getNextCounterValue = async function(type) {
         // Update local state
         state.counters[type] = newValue;
         
-        const prefix = type === 'delivery' ? 'BL' : 'BC';
+        let prefix = 'TRN';
+        if (type === 'delivery') prefix = 'BL';
+        if (type === 'order') prefix = 'BC';
+        if (type === 'dispense') prefix = 'PR';
+
         return `${prefix}-${newValue.toString().padStart(6, '0')}`;
     } catch (err) {
         console.error("Counter error:", err);
-        return (type === 'delivery' ? 'TRN-' : 'CMD-') + new Date().getTime().toString().slice(-6);
+        let fallbackPrefix = 'TRN-';
+        if (type === 'order') fallbackPrefix = 'CMD-';
+        if (type === 'dispense') fallbackPrefix = 'PR-';
+        return fallbackPrefix + new Date().getTime().toString().slice(-6);
     }
 };
 
@@ -567,7 +688,7 @@ window.resetCounters = async function() {
     
     if (confirm) {
         try {
-            await _supabase.from('app_counters').update({ value: 0 }).in('id', ['delivery', 'order']);
+            await _supabase.from('app_counters').update({ value: 0 }).in('id', ['delivery', 'order', 'dispense']);
             await loadDataFromSupabase();
             window.showToast("Compteurs réinitialisés à 0");
         } catch (err) {
@@ -1862,14 +1983,24 @@ window.renderView = function(viewName) {
         state.transfers.forEach(tItem => {
             const actionTrans = tItem.isReturn ? (currentLang==='ar'?'إرجاع للمركزي':'Retour Central') : t('action_transfer');
             const qtyStr = tItem.isReturn ? `-${tItem.qty} (عودة)` : `+${tItem.qty}`;
-            allLogs.push({ date: tItem.date, action: actionTrans, med: tItem.medName, qty: qtyStr, dest: state.pharmacies[tItem.toPharmacy].name[currentLang], worker: window.parseWorkerName(tItem.dispensedBy, currentLang) });
+            allLogs.push({ ref: `TRN-${tItem.id}`, date: tItem.date, action: actionTrans, med: tItem.medName, qty: qtyStr, dest: state.pharmacies[tItem.toPharmacy]?.name[currentLang] || '-', worker: window.parseWorkerName(tItem.dispensedBy, currentLang) });
         });
         state.dispensations.forEach(d => {
-            allLogs.push({ date: d.date, action: t('action_dispense'), med: d.medName, qty: `-${d.qty}`, dest: d.patientName, worker: window.parseWorkerName(d.dispensedBy, currentLang) });
+            allLogs.push({ ref: d.reference, date: d.date, action: t('action_dispense'), med: d.medName, qty: `-${d.qty}`, dest: d.patientName, worker: window.parseWorkerName(d.dispensedBy, currentLang) });
         });
         allLogs.sort((a,b) => new Date(b.date) - new Date(a.date));
 
-        const rRows = allLogs.map(log => `<tr><td>${formatDate(log.date)}</td><td><span class="status-badge ${log.qty.startsWith('+') ? 'good' : 'warning'}">${log.action}</span></td><td><strong>${log.med}</strong></td><td><span dir="ltr">${log.qty}</span></td><td>${log.dest}</td><td>${log.worker}</td></tr>`).join('');
+        const rRows = allLogs.map(log => `
+            <tr>
+                <td><small><strong>${log.ref || '-'}</strong></small></td>
+                <td>${formatDate(log.date)}</td>
+                <td><span class="status-badge ${log.qty.startsWith('+') ? 'good' : 'warning'}">${log.action}</span></td>
+                <td><strong>${log.med}</strong></td>
+                <td><span dir="ltr">${log.qty}</span></td>
+                <td>${log.dest}</td>
+                <td>${log.worker}</td>
+            </tr>
+        `).join('');
 
         content = `
             <div class="page-header" style="justify-content: flex-end;">
@@ -1880,8 +2011,8 @@ window.renderView = function(viewName) {
             </div>
             <div class="table-container">
                 <table id="records-table">
-                    <thead><tr><th>${t('th_date')}</th><th>${t('th_action')}</th><th>${t('th_med')}</th><th>${t('th_qty')}</th><th>${t('th_pharmacy')}</th><th>${t('th_worker')}</th></tr></thead>
-                    <tbody>${rRows || `<tr><td colspan="6" style="text-align:center;">---</td></tr>`}</tbody>
+                    <thead><tr><th>Réf.</th><th>${t('th_date')}</th><th>${t('th_action')}</th><th>${t('th_med')}</th><th>${t('th_qty')}</th><th>${t('th_pharmacy')}</th><th>${t('th_worker')}</th></tr></thead>
+                    <tbody>${rRows || `<tr><td colspan="7" style="text-align:center;">---</td></tr>`}</tbody>
                 </table>
             </div>
         `;
@@ -2042,6 +2173,7 @@ window.renderView = function(viewName) {
         const myLogs = [];
         state.transfers.filter(tItem => tItem.toPharmacy == pharmId).forEach(tItem => {
             myLogs.push({ 
+                ref: `TRN-${tItem.id}`,
                 date: tItem.date, 
                 action: tItem.isReturn ? 'Retour' : 'Réception', 
                 med: tItem.medName, 
@@ -2052,6 +2184,7 @@ window.renderView = function(viewName) {
         });
         state.dispensations.filter(d => d.pharmacyId == pharmId).forEach(d => {
             myLogs.push({ 
+                ref: d.reference,
                 date: d.date, 
                 action: 'Délivrance', 
                 med: d.medName, 
@@ -2064,6 +2197,7 @@ window.renderView = function(viewName) {
 
         const rows = myLogs.map(l => `
             <tr>
+                <td><small><strong>${l.ref || '-'}</strong></small></td>
                 <td>${formatDate(l.date)}</td>
                 <td><span class="status-badge ${l.qty.startsWith('+') ? 'good' : 'warning'}">${l.action}</span></td>
                 <td><strong>${l.med}</strong></td>
@@ -2081,6 +2215,7 @@ window.renderView = function(viewName) {
                 <table id="my-register-table">
                     <thead>
                         <tr>
+                            <th>Réf.</th>
                             <th>${t('th_date')}</th>
                             <th>${t('th_action')}</th>
                             <th>${t('th_med')}</th>
@@ -2090,7 +2225,7 @@ window.renderView = function(viewName) {
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows || '<tr><td colspan="6" style="text-align:center;">Aucune activité</td></tr>'}
+                        ${rows || '<tr><td colspan="7" style="text-align:center;">Aucune activité</td></tr>'}
                     </tbody>
                 </table>
             </div>
@@ -2323,7 +2458,8 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
     const p = state.pharmacies[pharmId];
     pageTitle.innerText = p.name.fr;
     
-    const isAdmin = currentUser && currentUser.role === 'admin';
+    const isFullAdmin = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+    const isAdmin = isFullAdmin; // For compatibility with existing isAdmin checks in this function
     
     let notificationsHtml = '';
     const myReceipts = (state.receipts || []).filter(r => (r.pharmacy_id || r.pharmacyId) == pharmId).slice().reverse();
@@ -2355,8 +2491,13 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
     }
 
     const dashboardHeaderHtml = `
-        <div class="page-header" style="justify-content: flex-end;">
-            ${isAdmin ? `
+        <div class="page-header" style="justify-content: flex-end; gap: 10px;">
+            ${isFullAdmin ? `
+            <button class="primary-btn" style="background:#059669;" onclick="document.getElementById('import-pharm-stock-${pharmId}').click()">
+                <i class="fa-solid fa-file-import"></i> ${currentLang==='ar'?'استيراد مخزون ابتدائي':'Import Stock Initial'}
+            </button>
+            <input type="file" id="import-pharm-stock-${pharmId}" accept=".xlsx, .xls, .csv" style="display:none;" onchange="window.importPharmacyStock(event, ${pharmId})">
+            
             <button class="primary-btn" style="background:var(--accent-green);" onclick="window.openDistForPharmacy(${pharmId})">
                 <i class="fa-solid fa-truck-ramp-box"></i> ${currentLang==='ar'?'إرسال أدوية لهذه الصيدلية':'Restocker cette pharmacie'}
             </button>
@@ -2501,11 +2642,18 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
                 <div class="table-container">
                     <table>
                         <thead>
-                            <tr><th>${t('th_date')}</th><th>${t('th_patient')}</th><th>${t('th_med')}</th><th>${t('th_qty')}</th><th>${t('th_worker')}</th></tr>
+                            <tr><th>Réf.</th><th>${t('th_date')}</th><th>${t('th_patient')}</th><th>${t('th_med')}</th><th>${t('th_qty')}</th><th>${t('th_worker')}</th></tr>
                         </thead>
                         <tbody>
                             ${state.dispensations.filter(d => d.pharmacyId == pharmId).slice().reverse().map(d => `
-                                <tr><td>${formatDate(d.date)}</td><td>${d.patientName}</td><td><strong>${d.medName}</strong></td><td><span class="status-badge warning">-${d.qty}</span></td><td>${typeof d.dispensedBy === 'object' ? d.dispensedBy[currentLang] : (d.dispensedBy || '-')}</td></tr>
+                                <tr>
+                                    <td><small><strong>${d.reference || '-'}</strong></small></td>
+                                    <td>${formatDate(d.date)}</td>
+                                    <td>${d.patientName}</td>
+                                    <td><strong>${d.medName}</strong></td>
+                                    <td><span class="status-badge warning">-${d.qty}</span></td>
+                                    <td>${typeof d.dispensedBy === 'object' ? d.dispensedBy[currentLang] : (d.dispensedBy || '-')}</td>
+                                </tr>
                             `).join('')}
                         </tbody>
                     </table>
@@ -2702,6 +2850,8 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
             // --- FIN REGLE ---
 
             try {
+                const barcode = await window.getNextCounterValue('dispense');
+
                 for (const item of items) {
                     const med = p.stock.find(m => m.id === item.medId);
                     const newQty = med.qty - item.qty;
@@ -2714,13 +2864,14 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
                         medicine_name: item.medName,
                         qty: item.qty,
                         pharmacy_id: pharmId,
-                        dispensed_by: currentUser ? (typeof currentUser.name === 'object' ? currentUser.name.fr : currentUser.name) : 'Staff'
+                        dispensed_by: currentUser ? (typeof currentUser.name === 'object' ? currentUser.name.fr : currentUser.name) : 'Staff',
+                        reference: barcode
                     }]);
                 }
                 
                 await loadDataFromSupabase();
                 await window.showCustomDialog({ title: "Succès", msg: t('alert_success'), icon: "fa-circle-check" });
-                await window.autoDownloadReceipt('DELIVRANCE', patientName, items);
+                await window.autoDownloadReceipt('DELIVRANCE', patientName, items, barcode);
                 window.renderPharmacy(pharmId, 'pharm-dispense');
             } catch (err) {
                 console.error(err);
