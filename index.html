@@ -12,7 +12,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- CSS -->
-    <link rel="stylesheet" href="text.css?v=8">
+    <link rel="stylesheet" href="text.css?v=21">
     <!-- SheetJS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- html2pdf for PDF Generation -->
@@ -213,6 +213,38 @@
         </div>
     </div>
     
+    <!-- Add/Edit Patient Modal -->
+    <div id="patient-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="patient-modal-title">Ajouter un Patient</h3>
+                <button class="close-modal" onclick="document.getElementById('patient-modal').classList.remove('active')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="patient-form">
+                <input type="hidden" id="patient-id">
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>Nom complet</label>
+                    <input type="text" id="patient-name-input" required placeholder="Nom du patient">
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>N° National d'identité</label>
+                    <input type="text" id="patient-nid-input" placeholder="0000000000">
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>Téléphone</label>
+                    <input type="tel" id="patient-phone-input" placeholder="00 00 00 00">
+                </div>
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label>Hôpital / Structure de suivi</label>
+                    <input type="text" id="patient-hospital-input" placeholder="Nom de l'hôpital">
+                </div>
+                <button type="submit" class="primary-btn full-width" style="justify-content: center; background: var(--primary-brand);">
+                    <i class="fa-solid fa-save"></i> Enregistrer
+                </button>
+            </form>
+        </div>
+    </div>
+
     <!-- Account Recovery Modal -->
     <div id="recovery-modal" class="modal-overlay">
         <div class="modal-content">
@@ -261,7 +293,7 @@
 
     <!-- Core App Logic -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20"></script>
+    <script src="app.js?v=21"></script>
 </body>
 
 </html>

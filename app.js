@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 20 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 21 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -1797,9 +1797,15 @@ window.renderView = function(viewName) {
                 totalDrawn = cons.total;
                 medsDetails = Object.keys(cons.meds).map(m => `${m} (${cons.meds[m]})`).join('<br>');
             }
-            let checkbox = '';
+            let actions = '';
             if(currentUser && currentUser.role === 'admin') {
                 checkbox = `<td><input type="checkbox" class="patient-checkbox" value="${p.id}"></td>`;
+                actions = `
+                    <td>
+                        <button class="icon-btn edit-btn" onclick="window.editPatient(${p.id})"><i class="fa-solid fa-pen"></i></button>
+                        <button class="icon-btn delete-btn" onclick="window.deletePatient(${p.id})"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                `;
             }
             return `<tr>
                 ${checkbox}
@@ -1809,6 +1815,7 @@ window.renderView = function(viewName) {
                 <td>${p.hospital}</td>
                 <td>${medsDetails}</td>
                 <td><span class="status-badge ${totalDrawn > 0 ? 'warning' : 'good'}">${totalDrawn}</span></td>
+                ${actions}
             </tr>`;
         }).join('');
 
@@ -1816,6 +1823,9 @@ window.renderView = function(viewName) {
             <div class="page-header" style="justify-content: flex-end;">
                 <div style="display:flex; gap: 10px;">
                     ${currentUser && currentUser.role === 'admin' ? `
+                    <button class="primary-btn" onclick="window.openPatientModal()">
+                        <i class="fa-solid fa-plus"></i> ${currentLang==='ar'?'إضافة مريض':'Ajouter Patient'}
+                    </button>
                     <label class="primary-btn" style="background:#059669; cursor:pointer;">
                         <i class="fa-solid fa-file-import"></i> ${t('btn_import_patients')}
                         <input type="file" id="import-patients-excel" accept=".xlsx, .xls, .csv" style="display:none;">
@@ -1835,8 +1845,9 @@ window.renderView = function(viewName) {
                         <th>${t('th_patient')}</th><th>${t('th_patient_nid')}</th><th>${t('th_patient_phone')}</th>
                         <th>${t('th_patient_hospital')}</th>
                         <th>${t('th_med')}</th><th>${t('th_total_qty')}</th>
+                        ${currentUser && currentUser.role === 'admin' ? `<th>Actions</th>` : ''}
                     </tr></thead>
-                    <tbody>${pRows || `<tr><td colspan="${currentUser && currentUser.role === 'admin' ? 7 : 6}" style="text-align:center;">---</td></tr>`}</tbody>
+                    <tbody>${pRows || `<tr><td colspan="${currentUser && currentUser.role === 'admin' ? 8 : 6}" style="text-align:center;">---</td></tr>`}</tbody>
                 </table>
             </div>
         `;
@@ -2977,6 +2988,87 @@ window.openDistForPharmacy = function(pharmId) {
     window.preSelectedPharm = pharmId;
     window.renderView('distribution');
 };
+
+window.openPatientModal = function(id = null) {
+    const modal = document.getElementById('patient-modal');
+    const form = document.getElementById('patient-form');
+    const title = document.getElementById('patient-modal-title');
+    
+    form.reset();
+    document.getElementById('patient-id').value = id || '';
+    
+    if(id) {
+        const p = state.patients.find(pt => pt.id === id);
+        if(p) {
+            title.innerText = currentLang === 'ar' ? 'تعديل مريض' : 'Modifier le Patient';
+            document.getElementById('patient-name-input').value = p.name;
+            document.getElementById('patient-nid-input').value = p.nationalId || '';
+            document.getElementById('patient-phone-input').value = p.phone || '';
+            document.getElementById('patient-hospital-input').value = p.hospital || '';
+        }
+    } else {
+        title.innerText = currentLang === 'ar' ? 'إضافة مريض جديد' : 'Ajouter un Patient';
+    }
+    
+    modal.classList.add('active');
+};
+
+window.editPatient = function(id) {
+    window.openPatientModal(id);
+};
+
+window.deletePatient = async function(id) {
+    const confirm = await window.showCustomDialog({ 
+        title: "Suppression", 
+        msg: currentLang === 'ar' ? "هل أنت متأكد من حذف هذا المريض؟" : "Supprimer ce patient ?", 
+        type: 'confirm', 
+        icon: 'fa-trash-can' 
+    });
+    if(confirm) {
+        try {
+            await _supabase.from('patients').delete().eq('id', id);
+            await loadDataFromSupabase();
+            window.renderView('patients');
+        } catch (err) { console.error(err); }
+    }
+};
+
+// Add listener for patient form in the main view logic (where other listeners are)
+// Or just handle it here if it's simpler
+document.addEventListener('DOMContentLoaded', () => {
+    const pForm = document.getElementById('patient-form');
+    if(pForm) {
+        pForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('patient-id').value;
+            const name = document.getElementById('patient-name-input').value;
+            const nid = document.getElementById('patient-nid-input').value;
+            const phone = document.getElementById('patient-phone-input').value;
+            const hospital = document.getElementById('patient-hospital-input').value;
+            
+            window.showToast("Enregistrement...", "info");
+            
+            const payload = { name, national_id: nid, phone, hospital };
+            
+            try {
+                if(id) {
+                    await _supabase.from('patients').update(payload).eq('id', id);
+                } else {
+                    // Get next ID if needed, but BIGSERIAL handles it
+                    await _supabase.from('patients').insert([payload]);
+                }
+                
+                await loadDataFromSupabase();
+                document.getElementById('patient-modal').classList.remove('active');
+                window.renderView('patients');
+                window.showToast("Patient enregistré !");
+            } catch (err) {
+                console.error(err);
+                window.showToast("Erreur lors de l'enregistrement", "error");
+            }
+        });
+    }
+});
 
 window.deleteMedicine = async function(id) {
     const confirm = await window.showCustomDialog({ title: "Suppression", msg: t('confirm_delete'), type: 'confirm', icon: 'fa-trash-can' });
