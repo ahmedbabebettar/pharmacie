@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 23 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 24 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -2510,6 +2510,10 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
             </button>
             <input type="file" id="import-pharm-stock-${pharmId}" accept=".xlsx, .xls, .csv" style="display:none;" onchange="window.importPharmacyStock(event, ${pharmId})">
             
+            <button class="primary-btn" style="background:#ef4444;" onclick="window.deleteSelectedPharmacyStock(${pharmId})">
+                <i class="fa-solid fa-trash-can"></i> ${t('btn_delete_selected')}
+            </button>
+
             <button class="primary-btn" style="background:var(--accent-green);" onclick="window.openDistForPharmacy(${pharmId})">
                 <i class="fa-solid fa-truck-ramp-box"></i> ${currentLang==='ar'?'إرسال أدوية لهذه الصيدلية':'Restocker cette pharmacie'}
             </button>
@@ -2625,6 +2629,7 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
                     <table>
                         <thead>
                             <tr>
+                                ${isFullAdmin ? `<th><input type="checkbox" onchange="window.toggleAllPharmacyStock(this, ${pharmId})"></th>` : ''}
                                 <th>${t('th_med')}</th>
                                 <th>${t('th_batch')}</th>
                                 <th>${t('th_expiry')}</th>
@@ -2635,14 +2640,20 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
                         <tbody>
                             ${p.stock.filter(m => m.qty > 0).map(m => `
                                 <tr>
+                                    ${isFullAdmin ? `<td><input type="checkbox" class="pharm-stock-checkbox-${pharmId}" value="${m.id}"></td>` : ''}
                                     <td><strong>${m.name}</strong></td>
                                     <td><small>${m.batch || '-'}</small></td>
                                     <td><small>${formatDate(m.expiry) || '-'}</small></td>
                                     <td style="text-align:center;"><span class="status-badge good">${m.qty}</span></td>
-                                    <td style="text-align:left;">
+                                    <td style="text-align:left; display:flex; gap:5px;">
                                         <button class="icon-btn edit-btn" title="${t('btn_return')}" onclick="window.returnToCentral(${pharmId}, ${m.id})">
                                             <i class="fa-solid fa-rotate-left"></i>
                                         </button>
+                                        ${isFullAdmin ? `
+                                        <button class="icon-btn delete-btn" title="Supprimer du stock صيدلية" onclick="window.deleteFromPharmacyStock(${pharmId}, ${m.id})">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                        ` : ''}
                                     </td>
                                 </tr>`).join('')}
                         </tbody>
@@ -3230,6 +3241,43 @@ window.deleteSelectedPatients = async function() {
             await _supabase.from('patients').delete().in('id', selected);
             await loadDataFromSupabase();
             window.renderView('patients');
+        } catch (err) { console.error(err); }
+    }
+};
+
+window.toggleAllPharmacyStock = function(source, pharmId) {
+    document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}`).forEach(cb => cb.checked = source.checked);
+};
+
+window.deleteFromPharmacyStock = async function(pharmId, medId) {
+    const confirm = await window.showCustomDialog({ 
+        title: "Suppression", 
+        msg: currentLang === 'ar' ? "هل أنت متأكد من حذف هذا الدواء من مخزون هذه الصيدلية؟" : "Supprimer ce médicament du stock de cette pharmacie ?", 
+        type: 'confirm', 
+        icon: 'fa-trash-can' 
+    });
+    if(confirm) {
+        try {
+            await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).eq('medicine_id', medId);
+            await loadDataFromSupabase();
+            window.renderPharmacy(pharmId);
+        } catch (err) { console.error(err); }
+    }
+};
+
+window.deleteSelectedPharmacyStock = async function(pharmId) {
+    const selected = Array.from(document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}:checked`)).map(cb => parseInt(cb.value));
+    if(selected.length === 0) return;
+    
+    const title = currentLang === 'ar' ? "حذف جماعي" : "Suppression Groupée";
+    const msg = currentLang === 'ar' ? `هل أنت متأكد من حذف ${selected.length} أدوية من مخزون الصيدلية؟` : `Supprimer ${selected.length} médicaments du stock de cette pharmacie ?`;
+    
+    const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-trash-can' });
+    if(confirm) {
+        try {
+            await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).in('medicine_id', selected);
+            await loadDataFromSupabase();
+            window.renderPharmacy(pharmId);
         } catch (err) { console.error(err); }
     }
 };
