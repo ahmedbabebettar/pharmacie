@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 25 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 26 - SYSTEM READY");
 
 // Translations
 const i18n = {
