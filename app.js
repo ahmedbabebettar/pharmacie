@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 21 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 22 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -2326,7 +2326,7 @@ window.renderView = function(viewName) {
                         }
 
                         rows.forEach(r => {
-                            let name = 'Unknown', batch = 'N/A', qty = 0, entryDate = null, expiry = null;
+                            let name = 'Unknown', batch = 'N/A', qty = 0, entryDate = null, expiry = null, price = 0;
                             for (let ObjectKey in r) {
                                 if (!r.hasOwnProperty(ObjectKey)) continue;
                                 let k = ObjectKey.trim().toLowerCase();
@@ -2336,12 +2336,13 @@ window.renderView = function(viewName) {
                                 else if (k.includes('qty') || k.includes('كمي') || k.includes('quant') || k.includes('qte')) qty = parseInt(val) || 0;
                                 else if ((k.includes('entry') || k.includes('دخول') || k.includes('تاريخ') || k.includes('date')) && !k.includes('exp') && !k.includes('صلاح')) entryDate = cleanDate(val);
                                 else if (k.includes('exp') || k.includes('صلاح') || k.includes('انتهاء') || k.includes('perem')) expiry = cleanDate(val);
+                                else if (k.includes('price') || k.includes('prix') || k.includes('سعر') || k.includes('ثمن') || k.includes('achat')) price = parseFloat(val) || 0;
                             }
                             if (name === 'Unknown' && Object.keys(r).length > 0) {
                                 name = r[Object.keys(r)[0]]; // Fallback to first column as name
                             }
                             if (name && name !== '') {
-                                medsToInsert.push({ name: String(name).trim(), batch: String(batch).trim(), qty, entry_date: entryDate, expiry_date: expiry });
+                                medsToInsert.push({ name: String(name).trim(), batch: String(batch).trim(), qty, entry_date: entryDate, expiry_date: expiry, price });
                             }
                         });
                         
