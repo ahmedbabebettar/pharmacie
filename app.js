@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 24 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 25 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -1424,6 +1424,9 @@ window.renderView = function(viewName) {
                     <button class="primary-btn" style="background:#ef4444;" onclick="window.deleteSelectedMeds()">
                         <i class="fa-solid fa-trash-can"></i> ${t('btn_delete_selected')}
                     </button>
+                    <button class="primary-btn" style="background:#b91c1c;" onclick="window.deleteAllMeds()">
+                        <i class="fa-solid fa-circle-exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supprimer'}
+                    </button>
                     ` : `
                     <button class="primary-btn" style="background:#0284c7;" onclick="window.exportCentralStockToExcel()">
                         <i class="fa-solid fa-file-export"></i> ${currentLang === 'ar' ? 'سحب Excel' : 'Exporter Excel'}
@@ -1832,6 +1835,9 @@ window.renderView = function(viewName) {
                     </label>
                     <button class="primary-btn" style="background:#ef4444;" onclick="window.deleteSelectedPatients()">
                         <i class="fa-solid fa-trash-can"></i> ${t('btn_delete_selected')}
+                    </button>
+                    <button class="primary-btn" style="background:#b91c1c;" onclick="window.deleteAllPatients()">
+                        <i class="fa-solid fa-circle-exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supprimer'}
                     </button>
                     ` : ''}
                     <button class="primary-btn btn-print" onclick="window.printPage()" style="background:var(--text-muted);"><i class="fa-solid fa-print"></i> ${t('btn_print')}</button>
@@ -3279,6 +3285,57 @@ window.deleteSelectedPharmacyStock = async function(pharmId) {
             await loadDataFromSupabase();
             window.renderPharmacy(pharmId);
         } catch (err) { console.error(err); }
+    }
+};
+
+window.deleteAllMeds = async function() {
+    const title = currentLang === 'ar' ? "تصفير المخزون بالكامل" : "Reset Stock Complet";
+    const msg = currentLang === 'ar' ? "تحذير: سيتم مسح جميع الأدوية من النظام والمخازن نهائياً! هل أنت متأكد؟" : "ATTENTION: Tous les médicaments seront supprimés du système définitivement ! Continuer ?";
+    
+    const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-triangle-exclamation' });
+    if(confirm) {
+        const doubleCheck = await window.showCustomDialog({ 
+            title: currentLang === 'ar' ? "تأكيد أخير" : "Confirmation Finale", 
+            msg: currentLang === 'ar' ? "اكتب 'مسح' للتأكيد النهائي:" : "Tapez 'DELETE' pour confirmer :", 
+            type: 'prompt',
+            icon: 'fa-lock'
+        });
+        
+        if(doubleCheck === (currentLang === 'ar' ? 'مسح' : 'DELETE')) {
+            window.showToast("Réinitialisation en cours...", "info");
+            try {
+                // Delete from medicines (cascades to pharmacy_stock)
+                await _supabase.from('medicines').delete().neq('id', 0); // Delete all where ID != 0 (effectively all)
+                await loadDataFromSupabase();
+                window.renderView('central');
+                window.showToast("Stock réinitialisé.");
+            } catch (err) { console.error(err); }
+        }
+    }
+};
+
+window.deleteAllPatients = async function() {
+    const title = currentLang === 'ar' ? "مسح جميع المرضى" : "Supprimer Tous les Patients";
+    const msg = currentLang === 'ar' ? "هل أنت متأكد من مسح قائمة المرضى بالكامل؟ لا يمكن التراجع عن هذه الخطوة." : "Voulez-vous vraiment supprimer TOUS les patients ? Cette action est irréversible.";
+    
+    const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-triangle-exclamation' });
+    if(confirm) {
+        const doubleCheck = await window.showCustomDialog({ 
+            title: currentLang === 'ar' ? "تأكيد أخير" : "Confirmation Finale", 
+            msg: currentLang === 'ar' ? "اكتب 'حذف' للتأكيد النهائي:" : "Tapez 'CONFIRMER' pour confirmer :", 
+            type: 'prompt',
+            icon: 'fa-lock'
+        });
+        
+        if(doubleCheck === (currentLang === 'ar' ? 'حذف' : 'CONFIRMER')) {
+            window.showToast("Suppression en cours...", "info");
+            try {
+                await _supabase.from('patients').delete().neq('id', 0); 
+                await loadDataFromSupabase();
+                window.renderView('patients');
+                window.showToast("Liste des patients vidée.");
+            } catch (err) { console.error(err); }
+        }
     }
 };
 
