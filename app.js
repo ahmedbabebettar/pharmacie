@@ -1625,13 +1625,35 @@ window.renderView = function(viewName) {
                     const selectedLot = searchValue.split(' (Lot: ')[1].split(' | ')[0];
                     const bestLot = eligibleBatches[0].batch;
                     if (selectedLot !== bestLot) {
-                        await window.showCustomDialog({
-                            title: "Alerte de Validité",
-                            msg: `Attention! Le Lot [${bestLot}] expire le [${eligibleBatches[0].expiry}] (Priorité FEFO). Veuillez l'utiliser en premier avant le Lot [${selectedLot}].`,
-                            icon: 'fa-triangle-exclamation'
-                        });
-                        valid = false;
-                        break;
+                        const isManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+                        let bypass = false;
+                        if (isManager) {
+                            bypass = await window.showCustomDialog({
+                                title: currentLang === 'ar' ? 'تجاوز شرط الصلاحية' : "Contournement FEFO",
+                                msg: currentLang === 'ar' ? `تحذير! الدفعة [${bestLot}] تنتهي صلاحيتها في [${eligibleBatches[0].expiry}] (أولوية FEFO). هل تريد حقاً صرف الدفعة [${selectedLot}]؟` : `Attention! Le Lot [${bestLot}] expire le [${eligibleBatches[0].expiry}] (Priorité FEFO). Voulez-vous vraiment délivrer le Lot [${selectedLot}] ?`,
+                                type: 'confirm',
+                                icon: 'fa-triangle-exclamation'
+                            });
+                        }
+                        
+                        if (!bypass) {
+                            if (!isManager) {
+                                await window.showCustomDialog({
+                                    title: "Alerte de Validité",
+                                    msg: `Attention! Le Lot [${bestLot}] expire le [${eligibleBatches[0].expiry}] (Priorité FEFO). Veuillez l'utiliser en premier avant le Lot [${selectedLot}].`,
+                                    icon: 'fa-triangle-exclamation'
+                                });
+                            }
+                            valid = false;
+                            break;
+                        }
+                    }
+                    
+                    // Prioritize the selected lot whether it's best or bypassed
+                    const selectedIndex = eligibleBatches.findIndex(b => b.batch === selectedLot);
+                    if (selectedIndex > -1) {
+                        const selectedBatchObj = eligibleBatches.splice(selectedIndex, 1)[0];
+                        eligibleBatches.unshift(selectedBatchObj);
                     }
                 }
 
@@ -2823,9 +2845,35 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
                     const selectedLot = searchVal.split(' [')[1].split(']')[0];
                     const bestLot = eligibleBatches[0].batch;
                     if (selectedLot !== bestLot) {
-                        await window.showCustomDialog({ title: "Alerte FEFO", msg: `Attention! Le Lot [${bestLot}] expire le [${eligibleBatches[0].expiry}] (Priorité FEFO). Veuillez le délivrer en premier avant le Lot [${selectedLot}].`, icon: "fa-triangle-exclamation" });
-                        valid = false;
-                        break;
+                        const isManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
+                        let bypass = false;
+                        if (isManager) {
+                            bypass = await window.showCustomDialog({
+                                title: currentLang === 'ar' ? 'تجاوز شرط الصلاحية' : "Contournement FEFO",
+                                msg: currentLang === 'ar' ? `تحذير! الدفعة [${bestLot}] تنتهي صلاحيتها في [${eligibleBatches[0].expiry}] (أولوية FEFO). هل تريد حقاً صرف الدفعة [${selectedLot}]؟` : `Attention! Le Lot [${bestLot}] expire le [${eligibleBatches[0].expiry}] (Priorité FEFO). Voulez-vous vraiment délivrer le Lot [${selectedLot}] ?`,
+                                type: 'confirm',
+                                icon: 'fa-triangle-exclamation'
+                            });
+                        }
+                        
+                        if (!bypass) {
+                            if (!isManager) {
+                                await window.showCustomDialog({ 
+                                    title: "Alerte FEFO", 
+                                    msg: `Attention! Le Lot [${bestLot}] expire le [${eligibleBatches[0].expiry}] (Priorité FEFO). Veuillez le délivrer en premier avant le Lot [${selectedLot}].`, 
+                                    icon: "fa-triangle-exclamation" 
+                                });
+                            }
+                            valid = false;
+                            break;
+                        }
+                    }
+                    
+                    // Prioritize the selected lot whether it's best or bypassed
+                    const selectedIndex = eligibleBatches.findIndex(b => b.batch === selectedLot);
+                    if (selectedIndex > -1) {
+                        const selectedBatchObj = eligibleBatches.splice(selectedIndex, 1)[0];
+                        eligibleBatches.unshift(selectedBatchObj);
                     }
                 }
 
