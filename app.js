@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 26 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 27 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -2423,9 +2423,9 @@ window.renderView = function(viewName) {
                                 let k = ObjectKey.trim().toLowerCase();
                                 let val = r[ObjectKey];
                                 if (k.includes('الاسم') || k.includes('name') || k.includes('مريض')) name = val;
-                                else if (k.includes('وطني') || k.includes('national') || (k.includes('رقم') && k.includes('تعريف'))) nid = val;
-                                else if (k.includes('هاتف') || k.includes('جوال') || k.includes('phone') || k.includes('tel')) phone = val;
-                                else if (k.includes('مستشفى') || k.includes('hospital') || k.includes('يتابع')) hospital = val;
+                                else if (k.includes('وطني') || k.includes('national') || k.includes('identit') || (k.includes('رقم') && k.includes('تعريف'))) nid = val;
+                                else if (k.includes('هاتف') || k.includes('جوال') || k.includes('phone') || k.includes('tel') || k.includes('téléphone')) phone = val;
+                                else if (k.includes('مستشفى') || k.includes('مركز') || k.includes('جهة') || k.includes('hospital') || k.includes('hopital') || k.includes('hôpital') || k.includes('structure') || k.includes('etablissement') || k.includes('يتابع')) hospital = val;
                             }
                             if (name === 'Unknown' && keys.length > 0) name = r[keys[0]];
                             if(name && name !== 'Unknown') {
