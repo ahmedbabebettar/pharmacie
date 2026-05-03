@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 30 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 31 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -2548,8 +2548,13 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
         <!-- Pharmacy Stat Cards -->
         <div class="stat-grid-5" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
             <div class="stat-card sc-green">
-                <div class="stat-val">${p.stock.reduce((acc, curr) => acc + curr.qty, 0)}</div>
-                <div class="stat-label">${t('stock_available') || 'Stock Total'}</div>
+                <div class="stat-val">${new Set(p.stock.filter(m => m.qty > 0).map(m => (m.name||'').trim().toLowerCase())).size}</div>
+                <div class="stat-label" style="text-transform: none; line-height: 1.4;">
+                    <strong>${currentLang === 'ar' ? 'نوع متوفر' : 'Types Disponibles'}</strong>
+                    <span style="display: block; font-size: 0.7rem; color: #7f8c8d; font-weight: 600;">
+                        ${currentLang === 'ar' ? 'الكمية الإجمالية:' : 'Total Unités:'} ${p.stock.reduce((acc, curr) => acc + curr.qty, 0)}
+                    </span>
+                </div>
             </div>
             <div class="stat-card sc-purple">
                 <div class="stat-val">${state.dispensations.filter(d => d.pharmacyId == pharmId).length}</div>
