@@ -12,7 +12,7 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- CSS -->
-    <link rel="stylesheet" href="text.css?v=27">
+    <link rel="stylesheet" href="text.css?v=28">
     <!-- SheetJS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- html2pdf for PDF Generation -->
@@ -245,27 +245,50 @@
         </div>
     </div>
 
-    <!-- Account Recovery Modal -->
-    <div id="recovery-modal" class="modal-overlay">
-        <div class="modal-content">
+    <!-- User Management Modal -->
+    <div id="user-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 400px;">
             <div class="modal-header">
-                <h3 data-i18n="recovery_title">Sécuriser mon compte</h3>
-                <button class="close-modal" onclick="document.getElementById('recovery-modal').classList.remove('active')"><i class="fa-solid fa-xmark"></i></button>
+                <h3 id="user-modal-title">Utilisateur</h3>
+                <button class="close-modal" onclick="document.getElementById('user-modal').classList.remove('active')"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px;">
-                Liez votre compte à un email ou téléphone personnel pour pouvoir le récupérer en cas de perte.
-            </p>
-            <form id="recovery-form">
+            <form id="user-form">
+                <input type="hidden" id="user-old-email">
+                <input type="hidden" id="user-id">
+                
                 <div class="form-group" style="margin-bottom: 12px;">
-                    <label>Email de récupération</label>
-                    <input type="email" id="recov-email" placeholder="mon-email@gmail.com">
+                    <label>Nom complet (Français)</label>
+                    <input type="text" id="user-name-fr-input" required placeholder="Ex: Mohamed Amine">
                 </div>
-                <div class="form-group" style="margin-bottom: 24px;">
-                    <label>Téléphone de secours</label>
-                    <input type="tel" id="recov-phone" placeholder="+213 ...">
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>الاسم الكامل (عربي)</label>
+                    <input type="text" id="user-name-ar-input" placeholder="مثال: محمد أمين">
                 </div>
-                <button type="submit" class="primary-btn full-width" style="justify-content: center; background: var(--accent-green);">
-                    <i class="fa-solid fa-link"></i> Enregistrer les informations
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>Email (Login)</label>
+                    <input type="email" id="user-email-input" required placeholder="nom@masef.com">
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>Mot de passe</label>
+                    <input type="password" id="user-pass-input" placeholder="Laissez vide pour ne pas changer">
+                </div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label>Rôle</label>
+                    <select id="user-role-input" onchange="document.getElementById('user-pharm-group').style.display = (this.value === 'pharmacy' ? 'block' : 'none')">
+                        <option value="pharmacy">Pharmacy (Pharmacien)</option>
+                        <option value="manager">Manager (Stock Central)</option>
+                        <option value="admin">Admin (Directeur)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="user-pharm-group" style="margin-bottom: 24px;">
+                    <label>Pharmacie assignée</label>
+                    <select id="user-pharm-input">
+                        <!-- Dynamic pharmacies -->
+                    </select>
+                </div>
+                
+                <button type="submit" class="primary-btn full-width" style="justify-content: center; background: var(--primary-brand); padding: 12px;">
+                    <i class="fa-solid fa-user-check"></i> Enregistrer l'utilisateur
                 </button>
             </form>
         </div>
@@ -293,7 +316,7 @@
 
     <!-- Core App Logic -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=27"></script>
+    <script src="app.js?v=28"></script>
 </body>
 
 </html>

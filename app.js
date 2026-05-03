@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 27 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 28 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -3550,105 +3550,99 @@ window.deleteUser = async function(email) {
     }
 };
 
-window.addUser = async function() {
-    const emailInput = await window.showCustomDialog({ title: "Nouvel Utilisateur", msg: "Entrez l'email (Login):", type: 'prompt', defaultValue: "@masef.com", icon: 'fa-user-plus' });
-    if(!emailInput) return;
-    const email = emailInput.toLowerCase().trim();
+window.openUserModal = function(oldEmail = null) {
+    const modal = document.getElementById('user-modal');
+    const form = document.getElementById('user-form');
+    const title = document.getElementById('user-modal-title');
+    const pharmSelect = document.getElementById('user-pharm-input');
     
-    const nameFr = await window.showCustomDialog({ title: "Nom (FR)", msg: "Entrez le nom en français:", type: 'prompt', icon: 'fa-signature' });
-    if(!nameFr) return;
-    const nameAr = await window.showCustomDialog({ title: "الاسم (AR)", msg: "أدخل الاسم بالعربية:", type: 'prompt', defaultValue: nameFr, icon: 'fa-signature' });
-    const pass = await window.showCustomDialog({ title: "Mot de passe", msg: "Définissez un mot de passe:", type: 'prompt', defaultValue: "123456", icon: 'fa-key' });
-    const role = await window.showCustomDialog({ title: "Rôle", msg: "Rôle (admin / pharmacy):", type: 'prompt', defaultValue: "pharmacy", icon: 'fa-user-shield' });
-    const pharmId = role === 'pharmacy' ? await window.showCustomDialog({ title: "Pharmacie", msg: "ID Pharmacie (1, 2, 3, 4):", type: 'prompt', defaultValue: "1", icon: 'fa-hospital' }) : null;
-
-    try {
-        window.updateSyncStatus('syncing', currentLang === 'ar' ? 'جاري الحفظ...' : 'Enregistrement...');
-        const { error } = await _supabase.from('users').insert([{
-            email, 
-            password: pass, 
-            role, 
-            name_fr: nameFr, 
-            name_ar: nameAr,
-            pharmacy_id: pharmId ? parseInt(pharmId) : null
-        }]);
-
-        if (error) throw error;
-
-        await syncUsers();
-        if (activeView === 'users') window.renderView('users');
-        window.updateSyncStatus('success', currentLang === 'ar' ? 'تم الحفظ' : 'Enregistré');
-        showToast(currentLang === 'ar' ? "تم إضافة المستخدم" : "Utilisateur ajouté avec succès");
-    } catch(e) { 
-        console.error("addUser detailed error:", e); 
-        window.updateSyncStatus('error');
-        const dbError = e.message || (typeof e === 'string' ? e : "Erreur inconnue");
-        window.showCustomDialog({ 
-            title: currentLang === 'ar' ? "خطأ تقني" : "Erreur Technique", 
-            msg: (currentLang === 'ar' ? "فشل في الحفظ: " : "Échec de sauvegarde : ") + dbError, 
-            icon: 'fa-circle-exclamation' 
-        });
-    }
-};
-
-window.editUser = async function(oldEmail) {
-    const user = window.userDatabase[oldEmail];
-    if(!user) {
-        showToast("Utilisateur introuvable", "error");
-        return;
-    }
+    form.reset();
+    document.getElementById('user-old-email').value = oldEmail || '';
+    document.getElementById('user-id').value = '';
+    document.getElementById('user-pass-input').placeholder = oldEmail ? "Laissez vide pour ne pas changer" : "Définissez un mot de passe";
     
-    const currentPass = user.pass || user.password || "";
-    const newEmail = await window.showCustomDialog({ title: "Modifier Email", msg: "Identifiant de connexion:", type: 'prompt', defaultValue: oldEmail, icon: 'fa-user-tag' });
-    if(newEmail === null) return; // User cancelled
+    // Populate Pharmacies
+    pharmSelect.innerHTML = Object.keys(state.pharmacies).map(k => 
+        `<option value="${k}">${state.pharmacies[k].name.fr}</option>`
+    ).join('');
 
-    const newNameFr = await window.showCustomDialog({ title: "Modifier Nom (FR)", msg: "Nom français:", type: 'prompt', defaultValue: (user.name && user.name.fr) || "", icon: 'fa-signature' });
-    if(newNameFr === null) return; 
-    const newNameAr = await window.showCustomDialog({ title: "تعديل الاسم (AR)", msg: "الاسم بالعربية:", type: 'prompt', defaultValue: (user.name && user.name.ar) || "", icon: 'fa-signature' });
-    const newPass = await window.showCustomDialog({ title: "Mot de passe", msg: "Laisser vide pour ne pas changer:", type: 'prompt', defaultValue: currentPass, icon: 'fa-key' });
-    const newRole = await window.showCustomDialog({ title: "Modifier Rôle", msg: "admin / pharmacy:", type: 'prompt', defaultValue: user.role, icon: 'fa-user-shield' });
-    let newPharmId = null;
-    if(newRole === 'pharmacy') {
-        newPharmId = await window.showCustomDialog({ title: "Pharmacie", msg: "ID (1, 2, 3...):", type: 'prompt', defaultValue: String(user.pharmacyId || "1"), icon: 'fa-hospital' });
-    }
-
-    try {
-        window.updateSyncStatus('syncing', currentLang === 'ar' ? 'جاري التعديل...' : 'Mise à jour...');
-        const updateData = {
-            email: (newEmail || oldEmail).toLowerCase().trim(),
-            role: newRole,
-            name_fr: newNameFr,
-            name_ar: newNameAr,
-            pharmacy_id: newPharmId ? parseInt(newPharmId) : null
-        };
-        // Only update password if changed
-        if(newPass && newPass !== currentPass) {
-            updateData.password = newPass;
+    if (oldEmail) {
+        const u = window.userDatabase[oldEmail];
+        if (u) {
+            title.innerText = currentLang === 'ar' ? 'تعديل مستخدم' : 'Modifier Utilisateur';
+            document.getElementById('user-id').value = u.id || '';
+            document.getElementById('user-name-fr-input').value = (u.name && u.name.fr) || u.name_fr || '';
+            document.getElementById('user-name-ar-input').value = (u.name && u.name.ar) || u.name_ar || '';
+            document.getElementById('user-email-input').value = oldEmail;
+            document.getElementById('user-role-input').value = u.role || 'pharmacy';
+            document.getElementById('user-pharm-input').value = u.pharmacyId || '';
+            document.getElementById('user-pharm-group').style.display = (u.role === 'pharmacy' ? 'block' : 'none');
         }
-        
-        // Use DB id if available (most reliable), fallback to email
-        const { error } = user.id 
-            ? await _supabase.from('users').update(updateData).eq('id', user.id)
-            : await _supabase.from('users').update(updateData).eq('email', oldEmail);
-        
-        if (error) throw error;
-        
-        // Full reload to ensure we get latest data from server
-        await loadDataFromSupabase();
-        await syncUsers();
-        window.renderView('users');
-        window.updateSyncStatus('success');
-        showToast(currentLang === 'ar' ? "تمت التحديث" : "Utilisateur mis à jour avec succès");
-    } catch(e) { 
-        console.error("editUser error:", e); 
-        window.updateSyncStatus('error');
-        window.showCustomDialog({ 
-            title: currentLang === 'ar' ? "خطأ" : "Erreur", 
-            msg: e.message || (currentLang === 'ar' ? "فشل في تحديث الحساب." : "Impossible de mettre à jour le compte."), 
-            icon: 'fa-circle-exclamation' 
+    } else {
+        title.innerText = currentLang === 'ar' ? 'إضافة مستخدم جديد' : 'Nouvel Utilisateur';
+        document.getElementById('user-role-input').value = 'pharmacy';
+        document.getElementById('user-pharm-group').style.display = 'block';
+        document.getElementById('user-pass-input').value = '123456';
+    }
+    
+    modal.classList.add('active');
+};
+
+window.addUser = function() { window.openUserModal(); };
+window.editUser = function(email) { window.openUserModal(email); };
+
+// Initialize User Form Listener
+document.addEventListener('DOMContentLoaded', () => {
+    const userForm = document.getElementById('user-form');
+    if (userForm) {
+        userForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const oldEmail = document.getElementById('user-old-email').value;
+            const id = document.getElementById('user-id').value;
+            const nameFr = document.getElementById('user-name-fr-input').value;
+            const nameAr = document.getElementById('user-name-ar-input').value;
+            const email = document.getElementById('user-email-input').value.toLowerCase().trim();
+            const pass = document.getElementById('user-pass-input').value;
+            const role = document.getElementById('user-role-input').value;
+            const pharmId = role === 'pharmacy' ? document.getElementById('user-pharm-input').value : null;
+
+            window.updateSyncStatus('syncing', currentLang === 'ar' ? 'جاري الحفظ...' : 'Enregistrement...');
+            
+            const payload = {
+                email,
+                name_fr: nameFr,
+                name_ar: nameAr,
+                role,
+                pharmacy_id: pharmId ? parseInt(pharmId) : null
+            };
+            if (pass) payload.password = pass;
+
+            try {
+                if (oldEmail) {
+                    // Update
+                    const { error } = id 
+                        ? await _supabase.from('users').update(payload).eq('id', id)
+                        : await _supabase.from('users').update(payload).eq('email', oldEmail);
+                    if (error) throw error;
+                } else {
+                    // Insert
+                    const { error } = await _supabase.from('users').insert([payload]);
+                    if (error) throw error;
+                }
+
+                await syncUsers();
+                document.getElementById('user-modal').classList.remove('active');
+                if (activeView === 'users') window.renderView('users');
+                window.updateSyncStatus('success');
+                showToast(currentLang === 'ar' ? "تم حفظ التعديلات" : "Utilisateur enregistré !");
+            } catch (err) {
+                console.error("User save error:", err);
+                window.updateSyncStatus('error');
+                window.showCustomDialog({ title: "Erreur", msg: err.message || "Erreur de sauvegarde", icon: "fa-circle-xclamation" });
+            }
         });
     }
-};
+});
 
 window.migrateUsersToCloud = async function() {
     const defaultUsersList = [
