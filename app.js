@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 29 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 30 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -1954,10 +1954,8 @@ window.renderView = function(viewName) {
         if(currentUser.role !== 'admin') { window.renderView('dashboard'); return; }
         pageTitle.innerText = "Gestion des Utilisateurs";
 
-        // Always sync from Supabase first, then re-render
-        syncUsers().then(() => {
-            if (activeView === 'users') window.renderView('users');
-        });
+        // removed recursive syncUsers() call to prevent infinite loop
+
 
         const users = Object.keys(window.userDatabase).map(email => ({ email, ...window.userDatabase[email] }));
 
