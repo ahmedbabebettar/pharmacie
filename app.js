@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 33 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 34 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -548,29 +548,34 @@ window.importPharmacyStock = async function(event, pharmId) {
             const data = evt.target.result;
             const workbook = XLSX.read(data, {type: 'binary'});
             const firstSheet = workbook.SheetNames[0];
-            const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
-            
+            const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1 });
             const processedRows = [];
-            for (const r of rows) {
-                let name = '', batch = '', expiry = null, qty = 0;
-                for (let k in r) {
-                    if (!r.hasOwnProperty(k)) continue;
-                    // Normalize accents (e.g. 'médicament' -> 'medicament')
-                    let key = k.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                    let val = r[k];
-                    
-                    if (key.includes('med') || key.includes('دواء') || key.includes('nom') || key.includes('name') || key.includes('الاسم') || key.includes('design') || key.includes('article')) name = String(val).trim();
-                    else if (key.includes('lot') || key.includes('batch') || key.includes('دفعة') || key.includes('تشغيل')) batch = String(val).trim();
-                    else if (key.includes('exp') || key.includes('صلاح') || key.includes('انتهاء') || key.includes('perem')) expiry = window.cleanDateForImport(val);
-                    else if (key.includes('qty') || key.includes('كمي') || key.includes('quant') || key.includes('qte')) qty = parseInt(val) || 0;
-                }
-                
-                // Fallback to first column if name wasn't explicitly found
-                if (!name && Object.keys(r).length > 0) {
-                    name = String(r[Object.keys(r)[0]]).trim();
-                }
+            
+            let hasHeaders = false;
+            let nameIdx = 0, batchIdx = 1, qtyIdx = 2, expIdx = 3;
 
-                if (name && name !== '') {
+            if (rawRows.length > 0) {
+                for (let i = 0; i < rawRows[0].length; i++) {
+                    let val = String(rawRows[0][i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                    if (val.includes('med') || val.includes('nom') || val.includes('دواء') || val.includes('name') || val.includes('design') || val.includes('article')) { hasHeaders = true; nameIdx = i; }
+                    else if (val.includes('lot') || val.includes('batch') || val.includes('دفعة') || val.includes('تشغيل')) { hasHeaders = true; batchIdx = i; }
+                    else if (val.includes('qty') || val.includes('qte') || val.includes('quant') || val.includes('كمي')) { hasHeaders = true; qtyIdx = i; }
+                    else if (val.includes('exp') || val.includes('صلاح') || val.includes('perem') || val.includes('انتهاء')) { hasHeaders = true; expIdx = i; }
+                }
+            }
+
+            const startIndex = hasHeaders ? 1 : 0;
+
+            for (let i = startIndex; i < rawRows.length; i++) {
+                const r = rawRows[i];
+                if (!r || r.length === 0) continue;
+                
+                let name = String(r[nameIdx] || '').trim();
+                let batch = String(r[batchIdx] || '').trim();
+                let qty = parseInt(r[qtyIdx]) || 0;
+                let expiry = window.cleanDateForImport(r[expIdx]);
+
+                if (name && name !== '' && name !== 'undefined') {
                     processedRows.push({ name, batch, expiry, qty });
                 }
             }
@@ -2347,7 +2352,7 @@ window.renderView = function(viewName) {
                         const data = evt.target.result;
                         const workbook = XLSX.read(data, {type: 'binary'});
                         const firstSheet = workbook.SheetNames[0];
-                        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
+                        const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1 });
                         const medsToInsert = [];
                         
                         function cleanDate(val) {
@@ -2360,26 +2365,39 @@ window.renderView = function(viewName) {
                             return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
                         }
 
-                        rows.forEach(r => {
-                            let name = 'Unknown', batch = 'N/A', qty = 0, entryDate = null, expiry = null, price = 0;
-                            for (let ObjectKey in r) {
-                                if (!r.hasOwnProperty(ObjectKey)) continue;
-                                let k = ObjectKey.trim().toLowerCase();
-                                let val = r[ObjectKey];
-                                if (k.includes('name') || k.includes('دواء') || k.includes('med') || k.includes('nom') || k.includes('design') || k.includes('article') || k.includes('الاسم')) name = val;
-                                else if (k.includes('batch') || k.includes('دفعة') || k.includes('lot') || k.includes('تشغيل')) batch = val;
-                                else if (k.includes('qty') || k.includes('كمي') || k.includes('quant') || k.includes('qte')) qty = parseInt(val) || 0;
-                                else if ((k.includes('entry') || k.includes('دخول') || k.includes('تاريخ') || k.includes('date')) && !k.includes('exp') && !k.includes('صلاح')) entryDate = cleanDate(val);
-                                else if (k.includes('exp') || k.includes('صلاح') || k.includes('انتهاء') || k.includes('perem')) expiry = cleanDate(val);
-                                else if (k.includes('price') || k.includes('prix') || k.includes('سعر') || k.includes('ثمن') || k.includes('achat')) price = parseFloat(val) || 0;
+                        let hasHeaders = false;
+                        let nameIdx = 0, batchIdx = 1, qtyIdx = 2, entryIdx = 3, expIdx = 4, priceIdx = 5;
+
+                        if (rawRows.length > 0) {
+                            for (let i = 0; i < rawRows[0].length; i++) {
+                                let val = String(rawRows[0][i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                if (val.includes('name') || val.includes('دواء') || val.includes('med') || val.includes('nom') || val.includes('design') || val.includes('article') || val.includes('الاسم')) { hasHeaders = true; nameIdx = i; }
+                                else if (val.includes('batch') || val.includes('دفعة') || val.includes('lot') || val.includes('تشغيل')) { hasHeaders = true; batchIdx = i; }
+                                else if (val.includes('qty') || val.includes('كمي') || val.includes('quant') || val.includes('qte')) { hasHeaders = true; qtyIdx = i; }
+                                else if ((val.includes('entry') || val.includes('دخول') || val.includes('تاريخ') || val.includes('date')) && !val.includes('exp') && !val.includes('صلاح')) { hasHeaders = true; entryIdx = i; }
+                                else if (val.includes('exp') || val.includes('صلاح') || val.includes('انتهاء') || val.includes('perem')) { hasHeaders = true; expIdx = i; }
+                                else if (val.includes('price') || val.includes('prix') || val.includes('سعر') || val.includes('ثمن') || val.includes('achat')) { hasHeaders = true; priceIdx = i; }
                             }
-                            if (name === 'Unknown' && Object.keys(r).length > 0) {
-                                name = r[Object.keys(r)[0]]; // Fallback to first column as name
+                        }
+
+                        const startIndex = hasHeaders ? 1 : 0;
+
+                        for (let i = startIndex; i < rawRows.length; i++) {
+                            const r = rawRows[i];
+                            if (!r || r.length === 0) continue;
+
+                            let name = String(r[nameIdx] || '').trim();
+                            let batch = String(r[batchIdx] || 'N/A').trim();
+                            if (batch === '' || batch === 'undefined') batch = 'N/A';
+                            let qty = parseInt(r[qtyIdx]) || 0;
+                            let entryDate = cleanDate(r[entryIdx]);
+                            let expiry = cleanDate(r[expIdx]);
+                            let price = parseFloat(r[priceIdx]) || 0;
+
+                            if (name && name !== '' && name !== 'undefined' && name !== 'Unknown') {
+                                medsToInsert.push({ name, batch, qty, entry_date: entryDate, expiry_date: expiry, price });
                             }
-                            if (name && name !== '') {
-                                medsToInsert.push({ name: String(name).trim(), batch: String(batch).trim(), qty, entry_date: entryDate, expiry_date: expiry, price });
-                            }
-                        });
+                        }
                         
                         const { data: maxRows } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1);
                         let currentId = (maxRows && maxRows.length > 0) ? parseInt(maxRows[0].id) : 0;
