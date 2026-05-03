@@ -1,4 +1,4 @@
-﻿console.log("APP.JS PARSED - VERSION 39 - SYSTEM READY");
+﻿console.log("APP.JS PARSED - VERSION 40 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -628,7 +628,7 @@ window.importPharmacyStock = async function(event, pharmId) {
                         const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
                             name: row.name,
                             batch: row.batch,
-                            expiry: row.expiry,
+                            expiry_date: row.expiry,
                             qty: 0,
                             entry_date: new Date().toISOString().split('T')[0]
                         }]).select('id').single();
@@ -652,7 +652,7 @@ window.importPharmacyStock = async function(event, pharmId) {
                         } else {
                             medicineId = newMed.id;
                             // Add to local cache so next lookup finds it instantly
-                            state.medicines.push({ id: medicineId, name: row.name, batch: row.batch, expiry: row.expiry, qty: 0 });
+                            state.medicines.push({ id: medicineId, name: row.name, batch: row.batch, expiry_date: row.expiry, qty: 0 });
                         }
                     }
 
