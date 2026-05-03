@@ -1,4 +1,4 @@
-﻿console.log("APP.JS PARSED - VERSION 41 - SYSTEM READY");
+﻿console.log("APP.JS PARSED - VERSION 42 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -591,6 +591,10 @@ window.importPharmacyStock = async function(event, pharmId) {
 
             if (processedRows.length === 0) { window.showToast("Aucun medicament valide. Verifiez le fichier.", "error"); return; }
 
+            // Get max medicine ID ONCE before the loop to avoid BIGSERIAL sequence conflict
+            const { data: _maxIdRow } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
+            let _nextMedicineId = _maxIdRow ? (parseInt(_maxIdRow.id) + 1) : 1000;
+
             let successCount = 0, errorCount = 0;
             const failedRows = [];
 
@@ -625,11 +629,9 @@ window.importPharmacyStock = async function(event, pharmId) {
 
                     // Step 3: Not found → create new medicine for this lot
                     if (!medicineId) {
-                        // Get max ID to avoid BIGSERIAL sequence conflict from manual inserts
-                        const { data: maxIdRow } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
-                        const nextId = maxIdRow ? (parseInt(maxIdRow.id) + 1) : 1;
+                        const thisId = _nextMedicineId++;
                         const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
-                            id: nextId,
+                            id: thisId,
                             name: row.name,
                             batch: row.batch,
                             expiry_date: row.expiry,
