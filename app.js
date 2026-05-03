@@ -1,4 +1,4 @@
-﻿console.log("APP.JS PARSED - VERSION 40 - SYSTEM READY");
+﻿console.log("APP.JS PARSED - VERSION 41 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -625,7 +625,11 @@ window.importPharmacyStock = async function(event, pharmId) {
 
                     // Step 3: Not found → create new medicine for this lot
                     if (!medicineId) {
+                        // Get max ID to avoid BIGSERIAL sequence conflict from manual inserts
+                        const { data: maxIdRow } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
+                        const nextId = maxIdRow ? (parseInt(maxIdRow.id) + 1) : 1;
                         const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
+                            id: nextId,
                             name: row.name,
                             batch: row.batch,
                             expiry_date: row.expiry,
