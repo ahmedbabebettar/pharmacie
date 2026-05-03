@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 28 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 29 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -3551,7 +3551,63 @@ window.deleteUser = async function(email) {
 };
 
 window.openUserModal = function(oldEmail = null) {
-    const modal = document.getElementById('user-modal');
+    let modal = document.getElementById('user-modal');
+    if (!modal) {
+        // Inject modal if missing (fixes browser caching old index.html)
+        const modalHtml = `
+            <div id="user-modal" class="modal-overlay">
+                <div class="modal-content" style="max-width: 400px;">
+                    <div class="modal-header">
+                        <h3 id="user-modal-title">Utilisateur</h3>
+                        <button class="close-modal" onclick="document.getElementById('user-modal').classList.remove('active')"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <form id="user-form">
+                        <input type="hidden" id="user-old-email">
+                        <input type="hidden" id="user-id">
+                        
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label>Nom complet (Français)</label>
+                            <input type="text" id="user-name-fr-input" required placeholder="Ex: Mohamed Amine">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label>الاسم الكامل (عربي)</label>
+                            <input type="text" id="user-name-ar-input" placeholder="مثال: محمد أمين">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label>Email (Login)</label>
+                            <input type="email" id="user-email-input" required placeholder="nom@masef.com">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label>Mot de passe</label>
+                            <input type="password" id="user-pass-input" placeholder="Laissez vide pour ne pas changer">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label>Rôle</label>
+                            <select id="user-role-input" onchange="document.getElementById('user-pharm-group').style.display = (this.value === 'pharmacy' ? 'block' : 'none')">
+                                <option value="pharmacy">Pharmacy (Pharmacien)</option>
+                                <option value="manager">Manager (Stock Central)</option>
+                                <option value="admin">Admin (Directeur)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="user-pharm-group" style="margin-bottom: 24px;">
+                            <label>Pharmacie assignée</label>
+                            <select id="user-pharm-input"></select>
+                        </div>
+                        
+                        <button type="submit" class="primary-btn full-width" style="justify-content: center; background: var(--primary-brand); padding: 12px;">
+                            <i class="fa-solid fa-user-check"></i> Enregistrer l'utilisateur
+                        </button>
+                    </form>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        modal = document.getElementById('user-modal');
+        
+        // Attach listener since it didn't exist on load
+        document.getElementById('user-form').addEventListener('submit', window.handleUserSubmit);
+    }
+
     const form = document.getElementById('user-form');
     const title = document.getElementById('user-modal-title');
     const pharmSelect = document.getElementById('user-pharm-input');
@@ -3591,56 +3647,56 @@ window.openUserModal = function(oldEmail = null) {
 window.addUser = function() { window.openUserModal(); };
 window.editUser = function(email) { window.openUserModal(email); };
 
+window.handleUserSubmit = async function(e) {
+    e.preventDefault();
+    const oldEmail = document.getElementById('user-old-email').value;
+    const id = document.getElementById('user-id').value;
+    const nameFr = document.getElementById('user-name-fr-input').value;
+    const nameAr = document.getElementById('user-name-ar-input').value;
+    const email = document.getElementById('user-email-input').value.toLowerCase().trim();
+    const pass = document.getElementById('user-pass-input').value;
+    const role = document.getElementById('user-role-input').value;
+    const pharmId = role === 'pharmacy' ? document.getElementById('user-pharm-input').value : null;
+
+    window.updateSyncStatus('syncing', currentLang === 'ar' ? 'جاري الحفظ...' : 'Enregistrement...');
+    
+    const payload = {
+        email,
+        name_fr: nameFr,
+        name_ar: nameAr,
+        role,
+        pharmacy_id: pharmId ? parseInt(pharmId) : null
+    };
+    if (pass) payload.password = pass;
+
+    try {
+        if (oldEmail) {
+            const { error } = id 
+                ? await _supabase.from('users').update(payload).eq('id', id)
+                : await _supabase.from('users').update(payload).eq('email', oldEmail);
+            if (error) throw error;
+        } else {
+            const { error } = await _supabase.from('users').insert([payload]);
+            if (error) throw error;
+        }
+
+        await syncUsers();
+        document.getElementById('user-modal').classList.remove('active');
+        if (activeView === 'users') window.renderView('users');
+        window.updateSyncStatus('success');
+        showToast(currentLang === 'ar' ? "تم حفظ التعديلات" : "Utilisateur enregistré !");
+    } catch (err) {
+        console.error("User save error:", err);
+        window.updateSyncStatus('error');
+        window.showCustomDialog({ title: "Erreur", msg: err.message || "Erreur de sauvegarde", icon: "fa-circle-xclamation" });
+    }
+};
+
 // Initialize User Form Listener
 document.addEventListener('DOMContentLoaded', () => {
     const userForm = document.getElementById('user-form');
     if (userForm) {
-        userForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const oldEmail = document.getElementById('user-old-email').value;
-            const id = document.getElementById('user-id').value;
-            const nameFr = document.getElementById('user-name-fr-input').value;
-            const nameAr = document.getElementById('user-name-ar-input').value;
-            const email = document.getElementById('user-email-input').value.toLowerCase().trim();
-            const pass = document.getElementById('user-pass-input').value;
-            const role = document.getElementById('user-role-input').value;
-            const pharmId = role === 'pharmacy' ? document.getElementById('user-pharm-input').value : null;
-
-            window.updateSyncStatus('syncing', currentLang === 'ar' ? 'جاري الحفظ...' : 'Enregistrement...');
-            
-            const payload = {
-                email,
-                name_fr: nameFr,
-                name_ar: nameAr,
-                role,
-                pharmacy_id: pharmId ? parseInt(pharmId) : null
-            };
-            if (pass) payload.password = pass;
-
-            try {
-                if (oldEmail) {
-                    // Update
-                    const { error } = id 
-                        ? await _supabase.from('users').update(payload).eq('id', id)
-                        : await _supabase.from('users').update(payload).eq('email', oldEmail);
-                    if (error) throw error;
-                } else {
-                    // Insert
-                    const { error } = await _supabase.from('users').insert([payload]);
-                    if (error) throw error;
-                }
-
-                await syncUsers();
-                document.getElementById('user-modal').classList.remove('active');
-                if (activeView === 'users') window.renderView('users');
-                window.updateSyncStatus('success');
-                showToast(currentLang === 'ar' ? "تم حفظ التعديلات" : "Utilisateur enregistré !");
-            } catch (err) {
-                console.error("User save error:", err);
-                window.updateSyncStatus('error');
-                window.showCustomDialog({ title: "Erreur", msg: err.message || "Erreur de sauvegarde", icon: "fa-circle-xclamation" });
-            }
-        });
+        userForm.addEventListener('submit', window.handleUserSubmit);
     }
 });
 
