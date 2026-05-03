@@ -1,4 +1,4 @@
-﻿console.log("APP.JS PARSED - VERSION 36 - SYSTEM READY");
+﻿console.log("APP.JS PARSED - VERSION 37 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -580,84 +580,89 @@ window.importPharmacyStock = async function(event, pharmId) {
 
             let successCount = 0, errorCount = 0;
             const failedRows = [];
+
             for (const row of processedRows) {
                 try {
                     let medicineId = null;
 
-                    // Step 1: check local state cache
-                    let med = state.medicines.find(m =>
-                        m.name.toLowerCase().trim() === row.name.toLowerCase().trim() &&
-                        (m.batch || 'N/A').toLowerCase().trim() === row.batch.toLowerCase().trim()
+                    // ---- Find medicine by EXACT (name + batch) only ----
+                    // Each lot = independent medicine record
+                    const nameLower = row.name.toLowerCase().trim();
+                    const batchLower = row.batch.toLowerCase().trim();
+
+                    // Step 1: Check local cache (exact name + batch)
+                    const cached = state.medicines.find(m =>
+                        m.name.toLowerCase().trim() === nameLower &&
+                        (m.batch || 'N/A').toLowerCase().trim() === batchLower
                     );
+                    if (cached) {
+                        medicineId = cached.id;
+                    }
 
-                    if (med) {
-                        medicineId = med.id;
-                    } else {
-                        // Step 2: search in DB first (avoids duplicate insert errors)
-                        const { data: dbSearch } = await _supabase.from('medicines')
-                            .select('id, batch')
+                    // Step 2: Search DB by exact name + batch (case-insensitive)
+                    if (!medicineId) {
+                        const { data: dbFind } = await _supabase.from('medicines')
+                            .select('id')
                             .ilike('name', row.name)
-                            .limit(20);
-                        
-                        if (dbSearch && dbSearch.length > 0) {
-                            // Try exact batch match first
-                            const exactMatch = dbSearch.find(m =>
-                                (m.batch || 'N/A').toLowerCase().trim() === row.batch.toLowerCase().trim()
-                            );
-                            if (exactMatch) {
-                                medicineId = exactMatch.id;
-                            } else {
-                                // Take first match by name (different batch = new entry acceptable)
-                                // But don't reuse a different batch — insert new instead
-                                medicineId = null; // will insert below
-                            }
-                        }
+                            .ilike('batch', row.batch)
+                            .limit(1)
+                            .maybeSingle();
+                        if (dbFind) medicineId = dbFind.id;
+                    }
 
-                        // Step 3: if still no match, insert new medicine
-                        if (!medicineId) {
-                            const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
-                                name: row.name, batch: row.batch, expiry: row.expiry, qty: 0,
-                                entry_date: new Date().toISOString().split('T')[0]
-                            }]).select('id').single();
-                            
-                            if (medErr) {
-                                // Last resort: unique violation means it exists, search again without batch constraint
-                                const { data: fallback } = await _supabase.from('medicines')
-                                    .select('id, batch')
-                                    .ilike('name', row.name)
-                                    .ilike('batch', row.batch)
-                                    .limit(1)
-                                    .single();
-                                if (fallback) {
-                                    medicineId = fallback.id;
-                                } else {
-                                    errorCount++;
-                                    failedRows.push(row.name + ' [' + row.batch + ']: ' + medErr.message);
-                                    console.error('Cannot create medicine:', row.name, medErr);
-                                    continue;
-                                }
+                    // Step 3: Not found → create new medicine for this lot
+                    if (!medicineId) {
+                        const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
+                            name: row.name,
+                            batch: row.batch,
+                            expiry: row.expiry,
+                            qty: 0,
+                            entry_date: new Date().toISOString().split('T')[0]
+                        }]).select('id').single();
+
+                        if (medErr) {
+                            // Duplicate constraint — try one more time to find it
+                            const { data: retry } = await _supabase.from('medicines')
+                                .select('id')
+                                .ilike('name', row.name)
+                                .ilike('batch', row.batch)
+                                .limit(1)
+                                .maybeSingle();
+                            if (retry) {
+                                medicineId = retry.id;
                             } else {
-                                medicineId = newMed.id;
-                                state.medicines.push({ id: medicineId, name: row.name, batch: row.batch, expiry: row.expiry, qty: 0 });
+                                errorCount++;
+                                failedRows.push(row.name + ' [' + row.batch + ']: ' + medErr.message);
+                                console.error('Cannot find or create medicine:', row.name, row.batch, medErr);
+                                continue;
                             }
+                        } else {
+                            medicineId = newMed.id;
+                            // Add to local cache so next lookup finds it instantly
+                            state.medicines.push({ id: medicineId, name: row.name, batch: row.batch, expiry: row.expiry, qty: 0 });
                         }
                     }
 
-                    // Step 4: upsert into pharmacy_stock
+                    // ---- Upsert into pharmacy_stock ----
                     const { error: psErr } = await _supabase.from('pharmacy_stock').upsert({
                         pharmacy_id: pharmId,
                         medicine_id: medicineId,
                         qty: row.qty
                     }, { onConflict: 'pharmacy_id,medicine_id' });
-                    
+
                     if (psErr) {
                         errorCount++;
-                        failedRows.push(row.name + ': ' + psErr.message);
-                        console.error('Stock upsert err:', row.name, psErr);
+                        failedRows.push(row.name + ' [' + row.batch + ']: ' + psErr.message);
+                        console.error('pharmacy_stock upsert error:', row.name, psErr);
                     } else {
                         successCount++;
                     }
-                } catch(e) { errorCount++; failedRows.push(row.name + ': ' + e.message); console.error('Row err:', row.name, e); }
+
+                } catch(e) {
+                    errorCount++;
+                    failedRows.push(row.name + ' [' + row.batch + ']: ' + (e.message || e));
+                    console.error('Row error:', row.name, e);
+                }
             }
 
             await loadDataFromSupabase();
