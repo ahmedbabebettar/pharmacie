@@ -1,4 +1,4 @@
-﻿console.log("APP.JS PARSED - VERSION 38 - SYSTEM READY");
+﻿console.log("APP.JS PARSED - VERSION 39 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -687,12 +687,18 @@ window.importPharmacyStock = async function(event, pharmId) {
             }
 
             await loadDataFromSupabase();
-            if (successCount > 0) {
-                window.showToast('OK: ' + successCount + '/' + processedRows.length + ' articles importes' + (errorCount > 0 ? ' (' + errorCount + ' erreurs)' : '!'));
-                if (failedRows.length > 0) { console.warn('=== FAILED ROWS ==='); failedRows.forEach(r => console.warn(r)); }
-                window.renderPharmacy(pharmId, 'all');
+            window.renderPharmacy(pharmId, 'all');
+            if (failedRows.length > 0) {
+                // Show failed medicines visibly in a dialog
+                const errMsg = failedRows.slice(0, 20).join("\\n");
+                console.warn("=== FAILED ROWS ===\\n" + errMsg);
+                await window.showCustomDialog({
+                    title: successCount + "/" + processedRows.length + " importes - " + errorCount + " erreurs",
+                    msg: "Medicaments non importes:\\n" + failedRows.slice(0, 10).map((r, i) => (i+1) + ". " + r).join("\\n"),
+                    icon: "fa-triangle-exclamation"
+                });
             } else {
-                window.showToast('Echec: 0/' + processedRows.length + '. Voir console F12.', "error");
+                window.showToast("OK: " + successCount + "/" + processedRows.length + " articles importes!");
             }
         } catch (err) { console.error("Import error:", err); window.showToast("Erreur: " + (err.message || ''), "error"); }
     };
