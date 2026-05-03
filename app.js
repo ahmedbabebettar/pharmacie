@@ -1,4 +1,4 @@
-﻿console.log("APP.JS PARSED - VERSION 37 - SYSTEM READY");
+﻿console.log("APP.JS PARSED - VERSION 38 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -543,6 +543,19 @@ window.importPharmacyStock = async function(event, pharmId) {
     const file = event.target.files[0];
     if(!file) return;
     
+    const confirmClear = await window.showCustomDialog({
+        title: currentLang === "ar" ? "تنبيه: سيتم مسح المخزون الحالي" : "Attention: Le stock actuel sera effacé",
+        msg: currentLang === "ar" ? "سيتم حذف جميع الأدوية الحالية من هذه الصيدلية واستبدالها بالملف الجديد. هل أنت موافق؟" : "Tous les médicaments actuels de cette pharmacie seront supprimés et remplacés par le fichier importé. Confirmer?",
+        type: "confirm",
+        icon: "fa-file-import"
+    });
+    if (!confirmClear) { event.target.value = ""; return; }
+
+    // Delete all existing pharmacy_stock for this pharmacy first (clean slate)
+    window.showToast(currentLang === "ar" ? "جاري مسح المخزون القديم..." : "Suppression du stock actuel...", "info");
+    const { error: deleteErr } = await _supabase.from("pharmacy_stock").delete().eq("pharmacy_id", pharmId);
+    if (deleteErr) { console.error("Delete error:", deleteErr); }
+
     window.showToast("Importation en cours...", "info");
     const reader = new FileReader();
     reader.onload = async function(evt) {
@@ -643,17 +656,25 @@ window.importPharmacyStock = async function(event, pharmId) {
                         }
                     }
 
-                    // ---- Upsert into pharmacy_stock ----
-                    const { error: psErr } = await _supabase.from('pharmacy_stock').upsert({
+                    // ---- Insert into pharmacy_stock (table was cleared before import) ----
+                    const { error: psErr } = await _supabase.from('pharmacy_stock').insert({
                         pharmacy_id: pharmId,
                         medicine_id: medicineId,
                         qty: row.qty
-                    }, { onConflict: 'pharmacy_id,medicine_id' });
+                    });
 
                     if (psErr) {
-                        errorCount++;
-                        failedRows.push(row.name + ' [' + row.batch + ']: ' + psErr.message);
-                        console.error('pharmacy_stock upsert error:', row.name, psErr);
+                        // Fallback: try upsert in case of conflict
+                        const { error: upsertErr } = await _supabase.from('pharmacy_stock').upsert({
+                            pharmacy_id: pharmId,
+                            medicine_id: medicineId,
+                            qty: row.qty
+                        }, { onConflict: 'pharmacy_id,medicine_id' });
+                        if (upsertErr) {
+                            errorCount++;
+                            failedRows.push(row.name + ' [' + row.batch + ']: ' + upsertErr.message);
+                            console.error('pharmacy_stock error:', row.name, upsertErr);
+                        } else { successCount++; }
                     } else {
                         successCount++;
                     }
