@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 31 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 32 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -554,14 +554,23 @@ window.importPharmacyStock = async function(event, pharmId) {
             for (const r of rows) {
                 let name = '', batch = '', expiry = null, qty = 0;
                 for (let k in r) {
-                    let key = k.trim().toLowerCase();
+                    if (!r.hasOwnProperty(k)) continue;
+                    // Normalize accents (e.g. 'médicament' -> 'medicament')
+                    let key = k.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                     let val = r[k];
-                    if (key.includes('med') || key.includes('دواء') || key.includes('nom') || key.includes('name') || key.includes('الاسم')) name = String(val).trim();
+                    
+                    if (key.includes('med') || key.includes('دواء') || key.includes('nom') || key.includes('name') || key.includes('الاسم') || key.includes('design') || key.includes('article')) name = String(val).trim();
                     else if (key.includes('lot') || key.includes('batch') || key.includes('دفعة') || key.includes('تشغيل')) batch = String(val).trim();
                     else if (key.includes('exp') || key.includes('صلاح') || key.includes('انتهاء') || key.includes('perem')) expiry = window.cleanDateForImport(val);
                     else if (key.includes('qty') || key.includes('كمي') || key.includes('quant') || key.includes('qte')) qty = parseInt(val) || 0;
                 }
-                if (name) {
+                
+                // Fallback to first column if name wasn't explicitly found
+                if (!name && Object.keys(r).length > 0) {
+                    name = String(r[Object.keys(r)[0]]).trim();
+                }
+
+                if (name && name !== '') {
                     processedRows.push({ name, batch, expiry, qty });
                 }
             }
