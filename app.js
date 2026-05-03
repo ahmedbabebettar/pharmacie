@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 32 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 33 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -2557,9 +2557,9 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
         <!-- Pharmacy Stat Cards -->
         <div class="stat-grid-5" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
             <div class="stat-card sc-green">
-                <div class="stat-val">${new Set(p.stock.filter(m => m.qty > 0).map(m => (m.name||'').trim().toLowerCase())).size}</div>
+                <div class="stat-val">${p.stock.length}</div>
                 <div class="stat-label" style="text-transform: none; line-height: 1.4;">
-                    <strong>${currentLang === 'ar' ? 'نوع متوفر' : 'Types Disponibles'}</strong>
+                    <strong>${currentLang === 'ar' ? 'إجمالي الأصناف' : 'Total Articles'}</strong>
                     <span style="display: block; font-size: 0.7rem; color: #7f8c8d; font-weight: 600;">
                         ${currentLang === 'ar' ? 'الكمية الإجمالية:' : 'Total Unités:'} ${p.stock.reduce((acc, curr) => acc + curr.qty, 0)}
                     </span>
@@ -2678,13 +2678,13 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
                             </tr>
                         </thead>
                         <tbody>
-                            ${p.stock.filter(m => m.qty > 0).map(m => `
+                            ${p.stock.map(m => `
                                 <tr>
                                     ${isFullAdmin ? `<td><input type="checkbox" class="pharm-stock-checkbox-${pharmId}" value="${m.id}"></td>` : ''}
                                     <td><strong>${m.name}</strong></td>
                                     <td><small>${m.batch || '-'}</small></td>
                                     <td><small>${formatDate(m.expiry) || '-'}</small></td>
-                                    <td style="text-align:center;"><span class="status-badge good">${m.qty}</span></td>
+                                    <td style="text-align:center;"><span class="status-badge ${m.qty > 0 ? 'good' : 'bad'}">${m.qty}</span></td>
                                     <td style="text-align:left; display:flex; gap:5px;">
                                         <button class="icon-btn edit-btn" title="${t('btn_return')}" onclick="window.returnToCentral(${pharmId}, ${m.id})">
                                             <i class="fa-solid fa-rotate-left"></i>
