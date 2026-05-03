@@ -1,4 +1,4 @@
-console.log("APP.JS PARSED - VERSION 34 - SYSTEM READY");
+﻿console.log("APP.JS PARSED - VERSION 35 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -537,6 +537,8 @@ window.cleanDateForImport = function(val) {
     return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
 };
 
+
+// PATCH MARKER START - importPharmacyStock clean rewrite
 window.importPharmacyStock = async function(event, pharmId) {
     const file = event.target.files[0];
     if(!file) return;
@@ -548,109 +550,76 @@ window.importPharmacyStock = async function(event, pharmId) {
             const data = evt.target.result;
             const workbook = XLSX.read(data, {type: 'binary'});
             const firstSheet = workbook.SheetNames[0];
-            const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1 });
+            const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1, defval: '' });
             const processedRows = [];
             
-            let hasHeaders = false;
-            let nameIdx = 0, batchIdx = 1, qtyIdx = 2, expIdx = 3;
-
-            if (rawRows.length > 0) {
-                for (let i = 0; i < rawRows[0].length; i++) {
-                    let val = String(rawRows[0][i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                    if (val.includes('med') || val.includes('nom') || val.includes('دواء') || val.includes('name') || val.includes('design') || val.includes('article')) { hasHeaders = true; nameIdx = i; }
-                    else if (val.includes('lot') || val.includes('batch') || val.includes('دفعة') || val.includes('تشغيل')) { hasHeaders = true; batchIdx = i; }
-                    else if (val.includes('qty') || val.includes('qte') || val.includes('quant') || val.includes('كمي')) { hasHeaders = true; qtyIdx = i; }
-                    else if (val.includes('exp') || val.includes('صلاح') || val.includes('perem') || val.includes('انتهاء')) { hasHeaders = true; expIdx = i; }
-                }
+            if (rawRows.length === 0) { window.showToast("Fichier vide.", "error"); return; }
+            
+            let nameIdx = 0, batchIdx = 1, qtyIdx = 2, expIdx = 3, startIndex = 0, headerFound = false;
+            const firstRow = rawRows[0];
+            for (let i = 0; i < firstRow.length; i++) {
+                let v = String(firstRow[i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                if (v.includes('med') || v.includes('nom') || v.includes('name') || v.includes('article') || v.includes('design')) { nameIdx = i; headerFound = true; }
+                else if (v.includes('lot') || v.includes('batch')) { batchIdx = i; headerFound = true; }
+                else if (v.includes('qty') || v.includes('qte') || v.includes('quant')) { qtyIdx = i; headerFound = true; }
+                else if (v.includes('exp') || v.includes('perem')) { expIdx = i; headerFound = true; }
             }
-
-            const startIndex = hasHeaders ? 1 : 0;
+            if (headerFound) startIndex = 1;
 
             for (let i = startIndex; i < rawRows.length; i++) {
                 const r = rawRows[i];
                 if (!r || r.length === 0) continue;
-                
                 let name = String(r[nameIdx] || '').trim();
-                let batch = String(r[batchIdx] || '').trim();
+                let batch = String(r[batchIdx] || '').trim() || 'N/A';
                 let qty = parseInt(r[qtyIdx]) || 0;
                 let expiry = window.cleanDateForImport(r[expIdx]);
-
-                if (name && name !== '' && name !== 'undefined') {
-                    processedRows.push({ name, batch, expiry, qty });
-                }
+                if (name && name !== '' && name !== 'undefined') processedRows.push({ name, batch, expiry, qty });
             }
 
-            if (processedRows.length === 0) {
-                window.showToast("Aucun médicament valide trouvé.", "error");
-                return;
-            }
+            if (processedRows.length === 0) { window.showToast("Aucun medicament valide. Verifiez le fichier.", "error"); return; }
 
-            let successCount = 0;
-            const stockToUpsert = [];
-
+            let successCount = 0, errorCount = 0;
             for (const row of processedRows) {
-                // 1. Try to find medicine in central stock
-                let med = state.medicines.find(m => 
-                    m.name.toLowerCase() === row.name.toLowerCase() && 
-                    (row.batch === '' || m.batch.toLowerCase() === row.batch.toLowerCase())
-                );
-
-                let medicineId;
-                if (med) {
-                    medicineId = med.id;
-                } else {
-                    // 2. Auto-create if not found
-                    const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
-                        name: row.name,
-                        batch: row.batch || 'N/A',
-                        expiry: row.expiry,
-                        qty: 0, // In central stock it is 0
-                        entry_date: new Date().toISOString().split('T')[0]
-                    }]).select();
-                    
-                    if (medErr) {
-                        console.error("Error creating med:", row.name, medErr);
-                        continue;
+                try {
+                    let medicineId = null;
+                    let med = state.medicines.find(m =>
+                        m.name.toLowerCase().trim() === row.name.toLowerCase().trim() &&
+                        (m.batch || 'N/A').toLowerCase().trim() === row.batch.toLowerCase().trim()
+                    );
+                    if (med) {
+                        medicineId = med.id;
+                    } else {
+                        const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
+                            name: row.name, batch: row.batch, expiry: row.expiry, qty: 0,
+                            entry_date: new Date().toISOString().split('T')[0]
+                        }]).select('id').single();
+                        if (medErr) {
+                            const { data: existing } = await _supabase.from('medicines').select('id').ilike('name', row.name).ilike('batch', row.batch).maybeSingle();
+                            if (existing) medicineId = existing.id;
+                            else { errorCount++; console.error("Cannot create:", row.name, medErr.message); continue; }
+                        } else {
+                            medicineId = newMed.id;
+                            state.medicines.push({ id: medicineId, name: row.name, batch: row.batch, expiry: row.expiry, qty: 0 });
+                        }
                     }
-                    medicineId = newMed[0].id;
-                    // Update local state temporarily to avoid duplicate creation in this loop
-                    state.medicines.push({
-                        id: medicineId,
-                        name: row.name,
-                        batch: row.batch || 'N/A',
-                        expiry: row.expiry,
-                        qty: 0
-                    });
-                }
-
-                stockToUpsert.push({
-                    pharmacy_id: pharmId,
-                    medicine_id: medicineId,
-                    qty: row.qty
-                });
+                    const { error: psErr } = await _supabase.from('pharmacy_stock').upsert({ pharmacy_id: pharmId, medicine_id: medicineId, qty: row.qty }, { onConflict: 'pharmacy_id,medicine_id' });
+                    if (psErr) { errorCount++; console.error("Stock err:", row.name, psErr.message); }
+                    else successCount++;
+                } catch(e) { errorCount++; console.error("Row err:", row.name, e); }
             }
 
-            // 3. Upsert into pharmacy_stock
-            if (stockToUpsert.length > 0) {
-                const { error: upsertErr } = await _supabase
-                    .from('pharmacy_stock')
-                    .upsert(stockToUpsert, { onConflict: 'pharmacy_id,medicine_id' });
-                
-                if (upsertErr) throw upsertErr;
-                
-                successCount = stockToUpsert.length;
-                await loadDataFromSupabase();
-                window.showToast(`${successCount} articles importés avec succès!`);
+            await loadDataFromSupabase();
+            if (successCount > 0) {
+                window.showToast('OK: ' + successCount + '/' + processedRows.length + ' articles importes' + (errorCount > 0 ? ' (' + errorCount + ' erreurs)' : '!'));
                 window.renderPharmacy(pharmId, 'all');
+            } else {
+                window.showToast('Echec: 0/' + processedRows.length + '. Voir console F12.', "error");
             }
-
-        } catch (err) {
-            console.error("Import error:", err);
-            window.showToast("Erreur lors de l'importation", "error");
-        }
+        } catch (err) { console.error("Import error:", err); window.showToast("Erreur: " + (err.message || ''), "error"); }
     };
     reader.readAsBinaryString(file);
 };
+
 
 // =============================================
 // COUNTER LOGIC
@@ -4051,4 +4020,5 @@ setInterval(async () => {
         lastKnownOrderCount = currentCount;
     } catch(e) { /* Polling failed silently */ }
 }, 30000); // Every 30 seconds
+
 
