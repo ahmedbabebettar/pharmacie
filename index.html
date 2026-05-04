@@ -20,9 +20,11 @@
     <script>
         // Global Error Firewall: Catches syntax errors if app.js fails to load
         window.addEventListener('error', function(e) {
-            console.error("Global Catch:", e.message);
+            console.error("Global Catch:", e.message, "Line:", e.lineno);
             // Ignore benign extension errors
-            if(e.message && e.message.includes('extension')) return; 
+            if(e.message && e.message.includes('extension')) return;
+            // Ignore cross-origin script errors (CDN failures show as "Script error." at line 0)
+            if(e.lineno === 0 || e.message === 'Script error.' || e.message === 'Script error') return;
             
             let banner = document.getElementById('critical-error-banner');
             if(!banner) {
@@ -31,7 +33,7 @@
                 banner.style = "position:fixed; top:0; left:0; width:100%; background:#ef4444; color:white; text-align:center; padding:10px; z-index:9999; font-weight:bold; font-family:sans-serif;";
                 document.body.prepend(banner);
             }
-            banner.innerHTML = `⚠️ Erreur Critique Système : L'application n'a pas pu se charger correctement. <button onclick="window.location.reload(true)" style="margin-left:15px; padding:4px 8px; cursor:pointer;">Rafraîchir en profondeur (Ctrl+F5)</button>`;
+            banner.innerHTML = `⚠️ Erreur (L.${e.lineno}): ${e.message} <button onclick="window.location.reload(true)" style="margin-left:15px; padding:4px 8px; cursor:pointer;">Rafraîchir (Ctrl+F5)</button>`;
         });
     </script>
 </head>
@@ -319,7 +321,7 @@
 
     <!-- Core App Logic -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=44"></script>
+    <script src="app.js?v=45"></script>
 </body>
 
 </html>

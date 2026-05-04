@@ -378,9 +378,80 @@ const defaultState = {
 let state = defaultState;
 let activeView = 'dashboard';
 let pagination = {
-    central: { currentPage: 1, pageSize: 100 },
-    patients: { currentPage: 1, pageSize: 100 },
-    history: { currentPage: 1, pageSize: 100 }
+    central: { currentPage: 1, pageSize: 25, total: 0, search: '' },
+    patients: { currentPage: 1, pageSize: 25, total: 0, search: '' },
+    records: { currentPage: 1, pageSize: 25, total: 0, search: '' },
+    expired: { currentPage: 1, pageSize: 25, total: 0, search: '' },
+    transfers: { currentPage: 1, pageSize: 25, total: 0, search: '' },
+    dispensations: { currentPage: 1, pageSize: 25, total: 0, search: '' },
+    pharmacy_stock: { currentPage: 1, pageSize: 25, total: 0, search: '' }
+};
+
+async function fetchTableData(table, { page = 1, pageSize = 25, search = '', searchCol = 'name', filters = {}, order = { col: 'id', ascending: false }, select = '*' } = {}) {
+    let query = _supabase.from(table).select(select, { count: 'exact' });
+
+    if (search) {
+        query = query.ilike(searchCol, `%${search}%`);
+    }
+
+    Object.entries(filters).forEach(([col, val]) => {
+        if (val !== null && val !== undefined && val !== '') {
+            if (typeof val === 'object' && val.op === 'lt') {
+                query = query.lt(col, val.val);
+            } else {
+                query = query.eq(col, val);
+            }
+        }
+    });
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
+
+    if (order.col) {
+        query = query.order(order.col, { ascending: order.ascending });
+    }
+
+    const { data, count, error } = await query;
+    if (error) throw error;
+    return { data, total: count };
+}
+
+let searchTimeout;
+function debounceSearch(callback, ms = 500) {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(callback, ms);
+}
+
+function renderPaginationControls(view) {
+    const p = pagination[view];
+    if (!p || !p.total) return '';
+    const totalPages = Math.ceil(p.total / p.pageSize);
+    if (totalPages <= 1) return '';
+
+    return `
+    <div class="pagination-controls" style="display:flex; justify-content:center; align-items:center; gap:15px; margin-top:30px; padding:20px 0;">
+        <button class="primary-btn" style="padding:8px 15px; background:${p.currentPage === 1 ? '#e2e8f0' : 'var(--primary-brand)'}; color:${p.currentPage === 1 ? '#94a3b8' : '#fff'}; cursor:${p.currentPage === 1 ? 'not-allowed' : 'pointer'}" 
+            onclick="window.changePage('${view}', ${p.currentPage - 1})" ${p.currentPage === 1 ? 'disabled' : ''}>
+            <i class="fa-solid fa-chevron-left"></i> Précédent
+        </button>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <span style="font-weight:700; color:var(--primary-brand); background:#f0f9ff; padding:5px 12px; border-radius:6px; border:1px solid #bae6fd;">${p.currentPage}</span>
+            <span style="color:#64748b; font-weight:600;">/ ${totalPages}</span>
+        </div>
+        <button class="primary-btn" style="padding:8px 15px; background:${p.currentPage >= totalPages ? '#e2e8f0' : 'var(--primary-brand)'}; color:${p.currentPage >= totalPages ? '#94a3b8' : '#fff'}; cursor:${p.currentPage >= totalPages ? 'not-allowed' : 'pointer'}" 
+            onclick="window.changePage('${view}', ${p.currentPage + 1})" ${p.currentPage >= totalPages ? 'disabled' : ''}>
+            Suivant <i class="fa-solid fa-chevron-right"></i>
+        </button>
+    </div>`;
+}
+
+window.changePage = function(view, page) {
+    if (pagination[view]) {
+        pagination[view].currentPage = page;
+        window.renderView(view);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 };
 
 
@@ -402,39 +473,36 @@ async function fetchAllRecords(table, selectQuery = '*') {
 
 async function loadDataFromSupabase() {
     try {
-        console.log("Fetching data from Supabase...");
+        window.updateSyncStatus('syncing');
+        console.log("Fetching configuration from Supabase...");
         
-        // Parallel queries using pagination to bypass the 1000 items API hard cap
-        const [meds, pharms, stocks, trans, disps, pats, ords, remoteReceipts, counters, returns] = await Promise.all([
-            fetchAllRecords('medicines'),
-            _supabase.from('pharmacies').select('*'), // Small enough, no pagination needed
-            fetchAllRecords('pharmacy_stock', '*, medicines(*)'),
-            fetchAllRecords('transfers'),
-            fetchAllRecords('dispensations'),
-            fetchAllRecords('patients'),
-            fetchAllRecords('orders'),
-            fetchAllRecords('receipts').catch(e => { console.warn('Receipts table missing or empty', e); return { data: null }; }),
+        // Fetch small config tables and global counts
+        const [pharms, counters, returns, totalMeds, totalPats, totalTrans, totalDisps, totalExpired] = await Promise.all([
+            _supabase.from('pharmacies').select('*'),
             _supabase.from('app_counters').select('*'),
-            _supabase.from('return_requests').select('*')
+            _supabase.from('return_requests').select('*').eq('status', 'PENDING'),
+            _supabase.from('medicines').select('id', { count: 'exact', head: true }),
+            _supabase.from('patients').select('id', { count: 'exact', head: true }),
+            _supabase.from('transfers').select('id', { count: 'exact', head: true }),
+            _supabase.from('dispensations').select('id', { count: 'exact', head: true }),
+            _supabase.from('medicines').select('id', { count: 'exact', head: true }).lt('expiry_date', new Date().toISOString().split('T')[0])
         ]);
 
-        if (meds.error) throw meds.error;
+        // Update state statistics
+        state.stats = {
+            totalMeds: totalMeds.count || 0,
+            totalPatients: totalPats.count || 0,
+            totalDistributions: totalTrans.count || 0,
+            totalDispensations: totalDisps.count || 0,
+            totalExpired: totalExpired.count || 0
+        };
 
-        // Map Medicines
-        state.medicines = meds.data.map(m => ({
-            id: m.id, name: m.name, batch: m.batch, qty: m.qty, price: m.price || 0,
-            entryDate: m.entry_date || '-', expiry: m.expiry_date || '-' 
-        }));
-
-        // Map Pharmacies & Stock - Always rebuild from Supabase data
-        // First reset stock for existing pharmacies
-        Object.keys(state.pharmacies).forEach(k => { state.pharmacies[k].stock = []; state.pharmacies[k].patients = 0; });
-        
-        if (pharms.data && pharms.data.length > 0) {
+        // Map Pharmacies
+        if (pharms.data) {
             pharms.data.forEach(p => {
-                // Always update name and color from DB (whether pharmacy exists or not)
                 state.pharmacies[p.id] = {
-                    ...( state.pharmacies[p.id] || {} ),
+                    ...(state.pharmacies[p.id] || {}),
+                    id: p.id,
                     name: { ar: p.name_ar || '', fr: p.name_fr || '' },
                     color: p.color || '#047857',
                     patients: 0,
@@ -443,60 +511,8 @@ async function loadDataFromSupabase() {
             });
         }
 
-        stocks.data.forEach(s => {
-            const pharm = state.pharmacies[s.pharmacy_id];
-            if(pharm && s.medicines) {
-                pharm.stock.push({ 
-                    id: s.medicine_id, 
-                    name: s.medicines.name, 
-                    qty: s.qty,
-                    batch: s.medicines.batch,
-                    expiry: s.medicines.expiry_date
-                });
-            }
-        });
-
-        // Map Transfers
-        state.transfers = trans.data.map(t => ({
-            id: t.id, date: t.date.split('T')[0], medName: t.medicine_name, 
-            qty: t.qty, toPharmacy: t.to_pharmacy_id, isReturn: t.is_return, 
-            dispensedBy: t.dispensed_by 
-        }));
-
-        // Map Dispensations
-        state.dispensations = disps.data.map(d => ({
-            id: d.id, date: d.date.split('T')[0], patientName: d.patient_name, 
-            medName: d.medicine_name, qty: d.qty, pharmacyId: d.pharmacy_id, 
-            dispensedBy: d.dispensed_by, reference: d.reference
-        }));
-
-        // Map Patients
-        state.patients = pats.data.map(p => ({
-            id: p.id, name: p.name, nationalId: p.national_id, 
-            phone: p.phone, hospital: p.hospital 
-        }));
-        // Calculate Pharmacy Stats (Patients and Activity %)
-        const totalRegisteredPatients = state.patients.length;
-        Object.keys(state.pharmacies).forEach(pid => {
-            const pharmacyDisps = state.dispensations.filter(d => d.pharmacyId == pid);
-            const uniquePatients = new Set(pharmacyDisps.map(d => d.patientName));
-            state.pharmacies[pid].patients = uniquePatients.size;
-            
-            if (totalRegisteredPatients > 0) {
-                state.pharmacies[pid].percent = Math.round((uniquePatients.size / totalRegisteredPatients) * 100);
-            } else {
-                state.pharmacies[pid].percent = 0;
-            }
-        });
-
-        // Map Orders
-        state.orders = ords.data.map(o => ({
-            id: o.id, date: o.date, pharmacyId: o.pharmacy_id, 
-            workerName: o.worker_name, status: o.status, items: o.items 
-        }));
-
         // Map Counters
-        if (counters && counters.data) {
+        if (counters.data) {
             counters.data.forEach(c => {
                 if (c.id === 'delivery') state.counters.delivery = c.value;
                 if (c.id === 'order') state.counters.order = c.value;
@@ -504,40 +520,25 @@ async function loadDataFromSupabase() {
             });
         }
 
-        // Map Receipts
-        state.receipts = (remoteReceipts && remoteReceipts.data) ? remoteReceipts.data : (JSON.parse(localStorage.getItem('local_receipts')) || []);
+        // Map Pending Returns
+        state.pendingReturns = returns.data || [];
 
-        // Map Returns
-        if (returns && returns.data) {
-            state.pendingReturns = returns.data.map(r => ({
-                id: r.id, 
-                pharmacyId: r.pharmacy_id, 
-                medId: r.medicine_id, 
-                medName: r.med_name, 
-                qty: r.qty, 
-                workerName: r.worker_name,
-                status: r.status,
-                date: r.created_at
-            })).filter(r => r.status === 'PENDING');
-            
-            // Also store all returns for history view if needed
-            state.allReturns = returns.data.map(r => ({
-                id: r.id, pharmacyId: r.pharmacy_id, medId: r.medicine_id, 
-                medName: r.med_name, qty: r.qty, workerName: r.worker_name, 
-                status: r.status, date: r.created_at
-            }));
-        }
+        // Fetch recent transfers for dashboard
+        const { data: recentTrans } = await _supabase.from('transfers').select('*').order('date', { ascending: false }).limit(6);
+        state.transfers = recentTrans ? recentTrans.map(t => ({
+            id: t.id, date: t.date.split('T')[0], medName: t.medicine_name, 
+            qty: t.qty, toPharmacy: t.to_pharmacy_id, isReturn: t.is_return, 
+            dispensedBy: t.dispensed_by 
+        })) : [];
 
-        // Update medicine name suggestions for the "Add Medicine" modal
+        // Fetch pending orders
+        const { data: pendingOrds } = await _supabase.from('orders').select('*').eq('status', 'PENDING').order('date', { ascending: false });
+        state.orders = pendingOrds || [];
 
-        const uniqueNames = [...new Set(state.medicines.map(m => m.name))].sort();
-        const medDatalist = document.getElementById('med-names-datalist');
-        if (medDatalist) {
-            medDatalist.innerHTML = uniqueNames.map(name => `<option value="${name}"></option>`).join('');
-        }
+        console.log("Configuration loaded successfully!");
+        window.updateSyncStatus('success');
 
-        console.log("Data loaded successfully!");
-        if(typeof window.updateSidebarPharmacies === 'function') {
+        if (typeof window.updateSidebarPharmacies === 'function') {
             window.updateSidebarPharmacies();
         }
 
@@ -545,15 +546,13 @@ async function loadDataFromSupabase() {
             if (currentUser.role === 'admin' || currentUser.role === 'manager') {
                 window.renderView(activeView || 'dashboard');
             } else {
-                window.renderPharmacy(currentUser.pharmacyId);
+                await window.renderPharmacy(currentUser.pharmacyId);
             }
         }
-
-
     } catch (err) {
-        console.error("Detailed error loading data:", err);
-        const errMsg = err.message || JSON.stringify(err);
-        window.showToast("Erreur DB: " + errMsg, "error");
+        console.error("Error loading data:", err);
+        window.updateSyncStatus('error', 'Erreur de chargement');
+        window.showToast("Erreur DB: " + err.message, "error");
     }
 }
 
@@ -1018,13 +1017,23 @@ window.attemptLogin = async function() {
     try {
         console.log("Login Attempted!");
         
-        // Always re-sync users from Supabase before validating credentials
         const loginBtn = document.querySelector('#login-form button[type="submit"]');
         if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'Vérification...'; }
-        await syncUsers();
-        if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = t('login_btn') || 'Se connecter'; }
 
-        window.showToast("C'est en cours...", "success");
+        // Try to sync users from Supabase, but fall back to hardcoded users if unavailable
+        if (_supabase) {
+            try {
+                await syncUsers();
+            } catch(syncErr) {
+                console.warn("syncUsers failed, using local credentials:", syncErr);
+            }
+        } else {
+            console.warn("Supabase not available - using hardcoded credentials only.");
+        }
+
+        if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = t('login_btn') || 'Connexion'; }
+
+        window.showToast("Vérification en cours...", "success");
 
         let email = document.getElementById('login-user').value.toLowerCase().trim();
         const pass = document.getElementById('login-pass').value;
@@ -1114,11 +1123,11 @@ window.attemptLogin = async function() {
             
             const view = e.currentTarget.dataset.view;
             if (view && view.startsWith('pharmacy-')) {
-                window.renderPharmacy(e.currentTarget.dataset.pharmacyId, 'all');
+                await window.renderPharmacy(e.currentTarget.dataset.pharmacyId, 'all');
             } else if (view === 'pharm-inbox' || view === 'pharm-order' || view === 'pharm-dispense') {
-                window.renderPharmacy(currentUser.pharmacyId, view);
+                await window.renderPharmacy(currentUser.pharmacyId, view);
             } else if (view === 'dashboard' && currentUser && currentUser.role === 'pharmacy') {
-                window.renderPharmacy(currentUser.pharmacyId, 'all');
+                await window.renderPharmacy(currentUser.pharmacyId, 'all');
             } else if (view) {
                 window.renderView(view);
             }
@@ -1298,8 +1307,18 @@ function renderPaginationControls(view, totalItems) {
     `;
 }
 
-window.renderView = function(viewName) {
+window.renderView = async function(viewName) {
     activeView = viewName;
+    const viewContainer = document.getElementById('view-container');
+    const pageTitle = document.getElementById('page-title');
+    const t = window.translations[currentLang];
+    
+    // Show loading indicator
+    viewContainer.innerHTML = `<div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:100px; color:var(--primary-brand);">
+        <i class="fa-solid fa-circle-notch fa-spin" style="font-size:3rem; margin-bottom:15px;"></i>
+        <p style="font-weight:600;">${currentLang==='ar'?'جاري جلب البيانات...':'Chargement des données...'}</p>
+    </div>`;
+
     let content = '';
     
     if (viewName === 'dashboard') {
@@ -1425,17 +1444,16 @@ window.renderView = function(viewName) {
             
             <div class="stat-grid-6">
                 <div class="stat-card sc-green" onclick="window.renderView('central')">
-                    <div class="stat-val">${totalCentralCount.toLocaleString()}</div>
+                    <div class="stat-val">${state.stats.totalMeds.toLocaleString()}</div>
                     <div class="stat-label">${t('stat_total_meds')}</div>
                 </div>
                 <div class="stat-card sc-red" onclick="window.renderView('expired')">
-                    <div class="stat-val">${state.medicines.filter(m => isExpired(m.expiry)).length}</div>
+                    <div class="stat-val">${state.stats.totalExpired.toLocaleString()}</div>
                     <div class="stat-label">Périmés</div>
                 </div>
                 <div class="stat-card sc-orange" onclick="window.renderView('central')">
-                    <div class="stat-val">${state.medicines.filter(m => m.qty <= 50).length}</div>
+                    <div class="stat-val">---</div>
                     <div class="stat-label">Stock Faible</div>
-                </div>
                 ${currentUser.role !== 'manager' ? `
                 <div class="stat-card sc-blue" onclick="window.renderView('reports')">
                     <div class="stat-val">${Object.keys(state.pharmacies).length}</div>
@@ -1443,12 +1461,12 @@ window.renderView = function(viewName) {
                 </div>
                 ` : ''}
                 <div class="stat-card sc-purple" onclick="window.renderView('distribution')">
-                    <div class="stat-val">${state.transfers.length}</div>
+                    <div class="stat-val">${state.stats.totalDistributions.toLocaleString()}</div>
                     <div class="stat-label">${t('stat_distributions')}</div>
                 </div>
                 ${currentUser.role !== 'manager' ? `
                 <div class="stat-card sc-teal" onclick="window.renderView('patients')">
-                    <div class="stat-val">${state.patients.length}</div>
+                    <div class="stat-val">${state.stats.totalPatients.toLocaleString()}</div>
                     <div class="stat-label">${t('stat_patients')}</div>
                 </div>
                 ` : ''}
@@ -1473,65 +1491,140 @@ window.renderView = function(viewName) {
         `;
     } 
     else if (viewName === 'central') {
-        const activeMeds = state.medicines.filter(m => !isExpired(m.expiry));
-        const p = pagination.central;
-        const start = (p.currentPage - 1) * p.pageSize;
-        const currentMeds = activeMeds.slice(start, start + p.pageSize);
-        
         pageTitle.innerText = t('page_central');
+        const p = pagination.central;
 
-        const pendingOrders = (state.orders || []).filter(o => o.status === 'PENDING');
-        let ordersHtml = '';
-        if (pendingOrders.length > 0) {
-            ordersHtml = `
-            <div class="dash-row" style="margin-bottom:20px;">
-                <div class="dash-col" style="flex:1; border:2px solid var(--highlight-gold); min-height: auto;">
-                    <div class="block-title" style="color:var(--highlight-gold);">
-                        <i class="fa-solid fa-cart-shopping"></i> 
-                        ${currentLang === 'ar' ? 'طلبات التموين (Bon de Commande)' : 'Commandes en attente (Bon de Commande)'}
+        try {
+            const { data: meds, total } = await fetchTableData('medicines', {
+                page: p.currentPage,
+                pageSize: p.pageSize,
+                search: p.search,
+                searchCol: 'name',
+                order: { col: 'name', ascending: true }
+            });
+            p.total = total;
+            
+            const currentMeds = meds.map(m => ({
+                id: m.id, name: m.name, batch: m.batch, qty: m.qty, price: m.price || 0,
+                entryDate: m.entry_date || '-', expiry: m.expiry_date || '-' 
+            }));
+
+            const pendingOrders = (state.orders || []).filter(o => o.status === 'PENDING');
+            let ordersHtml = '';
+            if (pendingOrders.length > 0) {
+                ordersHtml = `
+                <div class="dash-row" style="margin-bottom:20px;">
+                    <div class="dash-col" style="flex:1; border:2px solid var(--highlight-gold); min-height: auto;">
+                        <div class="block-title" style="color:var(--highlight-gold);">
+                            <i class="fa-solid fa-cart-shopping"></i> 
+                            ${currentLang === 'ar' ? 'طلبات التموين (Bon de Commande)' : 'Commandes en attente (Bon de Commande)'}
+                        </div>
+                        <table style="font-size: 0.8rem;">
+                            <thead><tr><th>Réf</th><th>Pharmacie</th><th>Date</th><th>Action</th></tr></thead>
+                            <tbody>
+                                ${pendingOrders.map(o => `
+                                <tr>
+                                    <td><strong>${o.id && o.id.startsWith('BC-') ? o.id : '#' + o.id}</strong></td>
+                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
+                                    <td>${new Date(o.date).toLocaleDateString('fr-FR')}</td>
+                                    <td>
+                                        <button class="primary-btn" style="padding:2px 6px; font-size:11px; background:var(--info-blue);" onclick="window.downloadSavedReceipt('${o.id}')">PDF</button>
+                                        <button class="primary-btn" style="padding:2px 6px; font-size:11px; background:var(--primary-brand);" onclick="window.markOrderTreated('${o.id}')">Traiter</button>
+                                    </td>
+                                </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
                     </div>
-                    <table style="font-size: 0.8rem;">
-                        <thead><tr><th>Réf</th><th>Pharmacie</th><th>Date</th><th>Action</th></tr></thead>
-                        <tbody>
-                            ${pendingOrders.map(o => `
+                </div>`;
+            }
+
+            content = `
+                ${ordersHtml}
+                <div class="page-header" style="justify-content: space-between;">
+                    <div style="display:flex; gap:10px;">
+                        ${currentUser && currentUser.role === 'admin' ? `
+                        <button class="primary-btn" onclick="document.getElementById('add-medicine-form').removeAttribute('data-edit-id'); document.getElementById('add-medicine-form').reset(); document.getElementById('add-medicine-modal').classList.add('active')">
+                            <i class="fa-solid fa-plus"></i> ${t('add_med')}
+                        </button>
+                        ` : ''}
+                        ${currentUser && currentUser.role === 'admin' ? `
+                        <label class="primary-btn" style="background:#059669; cursor:pointer;">
+                            <i class="fa-solid fa-file-import"></i> ${t('btn_import')}
+                            <input type="file" id="import-excel" accept=".xlsx, .xls, .csv" style="display:none;">
+                        </label>
+                        <button class="primary-btn" style="background:#0284c7;" onclick="window.exportCentralStockToExcel()">
+                            <i class="fa-solid fa-file-export"></i> ${currentLang === 'ar' ? 'سحب Excel' : 'Exporter Excel'}
+                        </button>
+                        <button class="primary-btn" style="background:#ef4444;" onclick="window.deleteSelectedMeds()">
+                            <i class="fa-solid fa-trash-can"></i> ${t('btn_delete_selected')}
+                        </button>
+                        <button class="primary-btn" style="background:#b91c1c;" onclick="window.deleteAllMeds()">
+                            <i class="fa-solid fa-circle-exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supprimer'}
+                        </button>
+                        ` : `
+                        <button class="primary-btn" style="background:#0284c7;" onclick="window.exportCentralStockToExcel()">
+                            <i class="fa-solid fa-file-export"></i> ${currentLang === 'ar' ? 'سحب Excel' : 'Exporter Excel'}
+                        </button>
+                        `}
+                    </div>
+                    <div class="search-box">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-med" placeholder="${t('search_placeholder')}" value="${p.search || ''}">
+                    </div>
+                </div>
+                
+                <div class="table-container shadow-sm">
+                    <table id="central-table">
+                        <thead>
                             <tr>
-                                <td><strong>${o.id && o.id.startsWith('BC-') ? o.id : '#' + o.id}</strong></td>
-                                <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
-                                <td>${new Date(o.date).toLocaleDateString('fr-FR')}</td>
-                                <td>
-                                    <button class="primary-btn" style="padding:2px 6px; font-size:11px; background:var(--info-blue);" onclick="window.downloadSavedReceipt('${o.id}')">PDF</button>
-                                    <button class="primary-btn" style="padding:2px 6px; font-size:11px; background:var(--primary-brand);" onclick="window.markOrderTreated('${o.id}')">Traiter</button>
-                                </td>
+                                ${currentUser && currentUser.role === 'admin' ? `<th><input type="checkbox" id="select-all-meds" onchange="window.toggleAllMeds(this)"></th>` : ''}
+                                <th>${t('th_med')}</th>
+                                <th>${t('th_batch')}</th>
+                                <th>${t('th_qty')}</th>
+                                <th>${t('th_entry')}</th>
+                                <th>${t('th_expiry')}</th>
+                                <th>${currentLang === 'ar' ? 'سعر الشراء' : 'Prix d\'achat'}</th>
+                                <th>${t('th_status')}</th>
+                                ${currentUser && currentUser.role === 'admin' ? `<th>${t('th_actions')}</th>` : ''}
                             </tr>
-                            `).join('')}
-                        </tbody>
+                        </thead>
+                        <tbody>${generateCentralTableRows(currentMeds)}</tbody>
                     </table>
                 </div>
-            </div>`;
-        }
+                ${renderPaginationControls('central')}
+            `;
+            viewContainer.innerHTML = content;
 
-        content = `
-            ${ordersHtml}
-            <div class="page-header" style="justify-content: space-between;">
-                <div style="display:flex; gap:10px;">
-                    ${currentUser && currentUser.role === 'admin' ? `
-                    <button class="primary-btn" onclick="document.getElementById('add-medicine-form').removeAttribute('data-edit-id'); document.getElementById('add-medicine-form').reset(); document.getElementById('add-medicine-modal').classList.add('active')">
-                        <i class="fa-solid fa-plus"></i> ${t('add_med')}
-                    </button>
-                    ` : ''}
-                    ${currentUser && currentUser.role === 'admin' ? `
-                    <label class="primary-btn" style="background:#059669; cursor:pointer;">
-                        <i class="fa-solid fa-file-import"></i> ${t('btn_import')}
-                        <input type="file" id="import-excel" accept=".xlsx, .xls, .csv" style="display:none;">
-                    </label>
-                    <button class="primary-btn" style="background:#0284c7;" onclick="window.exportCentralStockToExcel()">
-                        <i class="fa-solid fa-file-export"></i> ${currentLang === 'ar' ? 'سحب Excel' : 'Exporter Excel'}
-                    </button>
-                    <button class="primary-btn" style="background:#ef4444;" onclick="window.deleteSelectedMeds()">
-                        <i class="fa-solid fa-trash-can"></i> ${t('btn_delete_selected')}
-                    </button>
-                    <button class="primary-btn" style="background:#b91c1c;" onclick="window.deleteAllMeds()">
-                        <i class="fa-solid fa-circle-exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supprimer'}
+            // Re-attach Search Listener with Debounce
+            const searchInput = document.getElementById('search-med');
+            if (searchInput) {
+                searchInput.focus();
+                // Place cursor at the end of text
+                const val = searchInput.value;
+                searchInput.value = '';
+                searchInput.value = val;
+
+                searchInput.addEventListener('input', (e) => {
+                    p.search = e.target.value;
+                    p.currentPage = 1;
+                    debounceSearch(() => window.renderView('central'), 500);
+                });
+            }
+
+            // Handle Import Excel Listener
+            const importInput = document.getElementById('import-excel');
+            if(importInput) {
+                importInput.addEventListener('change', window.handleCentralImport);
+            }
+
+        } catch (err) {
+            console.error("Central View Error:", err);
+            viewContainer.innerHTML = `<div class="error-state">${err.message}</div>`;
+        }
+        return;
+    }
+exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supprimer'}
                     </button>
                     ` : `
                     <button class="primary-btn" style="background:#0284c7;" onclick="window.exportCentralStockToExcel()">
@@ -1963,115 +2056,146 @@ window.renderView = function(viewName) {
     }
     else if (viewName === 'patients') {
         pageTitle.innerText = t('page_patients');
-        
-        const consumption = {};
-        state.dispensations.forEach(d => {
-            if(!consumption[d.patientName]) consumption[d.patientName] = { total: 0, meds: {} };
-            consumption[d.patientName].total += d.qty;
-            if(!consumption[d.patientName].meds[d.medName]) consumption[d.patientName].meds[d.medName] = 0;
-            consumption[d.patientName].meds[d.medName] += d.qty;
-        });
-
         const pState = pagination.patients;
-        const startP = (pState.currentPage - 1) * pState.pageSize;
-        const currentPats = state.patients.slice(startP, startP + pState.pageSize);
 
-        const pRows = currentPats.map(p => {
-            const cons = consumption[p.name];
-            let medsDetails = '---';
-            let totalDrawn = 0;
-            if(cons) {
-                totalDrawn = cons.total;
-                medsDetails = Object.keys(cons.meds).map(m => `${m} (${cons.meds[m]})`).join('<br>');
-            }
-            let actions = '';
-            if(currentUser && currentUser.role === 'admin') {
-                checkbox = `<td><input type="checkbox" class="patient-checkbox" value="${p.id}"></td>`;
-                actions = `
-                    <td>
-                        <button class="icon-btn edit-btn" onclick="window.editPatient(${p.id})"><i class="fa-solid fa-pen"></i></button>
-                        <button class="icon-btn delete-btn" onclick="window.deletePatient(${p.id})"><i class="fa-solid fa-trash"></i></button>
-                    </td>
-                `;
-            }
-            return `<tr>
-                ${checkbox}
-                <td><strong>${p.name}</strong></td>
-                <td>${p.nationalId}</td>
-                <td dir="ltr">${p.phone}</td>
-                <td>${p.hospital}</td>
-                <td>${medsDetails}</td>
-                <td><span class="status-badge ${totalDrawn > 0 ? 'warning' : 'good'}">${totalDrawn}</span></td>
-                ${actions}
-            </tr>`;
-        }).join('');
+        try {
+            const { data: currentPats, total } = await fetchTableData('patients', {
+                page: pState.currentPage,
+                pageSize: pState.pageSize,
+                search: pState.search,
+                searchCol: 'name',
+                order: { col: 'name', ascending: true }
+            });
+            pState.total = total;
 
-        content = `
-            <div class="page-header" style="justify-content: flex-end;">
-                <div style="display:flex; gap: 10px;">
-                    ${currentUser && currentUser.role === 'admin' ? `
-                    <button class="primary-btn" onclick="window.openPatientModal()">
-                        <i class="fa-solid fa-plus"></i> ${currentLang==='ar'?'إضافة مريض':'Ajouter Patient'}
-                    </button>
-                    <label class="primary-btn" style="background:#059669; cursor:pointer;">
-                        <i class="fa-solid fa-file-import"></i> ${t('btn_import_patients')}
-                        <input type="file" id="import-patients-excel" accept=".xlsx, .xls, .csv" style="display:none;">
-                    </label>
-                    <button class="primary-btn" style="background:#ef4444;" onclick="window.deleteSelectedPatients()">
-                        <i class="fa-solid fa-trash-can"></i> ${t('btn_delete_selected')}
-                    </button>
-                    <button class="primary-btn" style="background:#b91c1c;" onclick="window.deleteAllPatients()">
-                        <i class="fa-solid fa-circle-exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supprimer'}
-                    </button>
-                    ` : ''}
-                    <button class="primary-btn btn-print" onclick="window.printPage()" style="background:var(--text-muted);"><i class="fa-solid fa-print"></i> ${t('btn_print')}</button>
-                    <button class="primary-btn btn-excel" onclick="window.exportToExcel('patients-table', 'Patients')" style="background:#059669;"><i class="fa-solid fa-file-excel"></i> ${t('btn_excel')}</button>
+            const pRows = currentPats.map(p => {
+                let actions = '';
+                let checkbox = '';
+                if(currentUser && currentUser.role === 'admin') {
+                    checkbox = `<td><input type="checkbox" class="patient-checkbox" value="${p.id}"></td>`;
+                    actions = `
+                        <td>
+                            <button class="icon-btn edit-btn" onclick="window.editPatient(${p.id})"><i class="fa-solid fa-pen"></i></button>
+                            <button class="icon-btn delete-btn" onclick="window.deletePatient(${p.id})"><i class="fa-solid fa-trash"></i></button>
+                        </td>
+                    `;
+                }
+                return `<tr>
+                    ${checkbox}
+                    <td><strong>${p.name}</strong></td>
+                    <td>${p.national_id || '-'}</td>
+                    <td dir="ltr">${p.phone || '-'}</td>
+                    <td>${p.hospital || '-'}</td>
+                    <td>---</td>
+                    <td>---</td>
+                    ${actions}
+                </tr>`;
+            }).join('');
+
+            content = `
+                <div class="page-header" style="justify-content: space-between;">
+                    <div style="display:flex; gap: 10px;">
+                        ${currentUser && currentUser.role === 'admin' ? `
+                        <button class="primary-btn" onclick="window.openPatientModal()">
+                            <i class="fa-solid fa-plus"></i> ${currentLang==='ar'?'إضافة مريض':'Ajouter Patient'}
+                        </button>
+                        <label class="primary-btn" style="background:#059669; cursor:pointer;">
+                            <i class="fa-solid fa-file-import"></i> ${t('btn_import_patients')}
+                            <input type="file" id="import-patients-excel" accept=".xlsx, .xls, .csv" style="display:none;">
+                        </label>
+                        <button class="primary-btn" style="background:#ef4444;" onclick="window.deleteSelectedPatients()">
+                            <i class="fa-solid fa-trash-can"></i> ${t('btn_delete_selected')}
+                        </button>
+                        ` : ''}
+                    </div>
+                    <div class="search-box">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-patient" placeholder="${t('search_placeholder')}" value="${pState.search || ''}">
+                    </div>
                 </div>
-            </div>
-            <div class="table-container">
-                <table id="patients-table">
-                    <thead><tr>
-                        ${currentUser && currentUser.role === 'admin' ? `<th><input type="checkbox" id="select-all-patients" onchange="window.toggleAllPatients(this)"></th>` : ''}
-                        <th>${t('th_patient')}</th><th>${t('th_patient_nid')}</th><th>${t('th_patient_phone')}</th>
-                        <th>${t('th_patient_hospital')}</th>
-                        <th>${t('th_med')}</th><th>${t('th_total_qty')}</th>
-                        ${currentUser && currentUser.role === 'admin' ? `<th>Actions</th>` : ''}
-                    </tr></thead>
-                    <tbody>${pRows || `<tr><td colspan="${currentUser && currentUser.role === 'admin' ? 8 : 6}" style="text-align:center;">---</td></tr>`}</tbody>
-                </table>
-            </div>
-        `;
+                <div class="table-container shadow-sm">
+                    <table id="patients-table">
+                        <thead><tr>
+                            ${currentUser && currentUser.role === 'admin' ? `<th><input type="checkbox" id="select-all-patients" onchange="window.toggleAllPatients(this)"></th>` : ''}
+                            <th>${t('th_patient')}</th><th>${t('th_patient_nid')}</th><th>${t('th_patient_phone')}</th>
+                            <th>${t('th_patient_hospital')}</th>
+                            <th>${t('th_med')}</th><th>${t('th_total_qty')}</th>
+                            ${currentUser && currentUser.role === 'admin' ? `<th>Actions</th>` : ''}
+                        </tr></thead>
+                        <tbody>${pRows || `<tr><td colspan="${currentUser && currentUser.role === 'admin' ? 8 : 6}" style="text-align:center;">---</td></tr>`}</tbody>
+                    </table>
+                </div>
+                ${renderPaginationControls('patients')}
+            `;
+            viewContainer.innerHTML = content;
+
+            // Search Listener
+            const searchInput = document.getElementById('search-patient');
+            if (searchInput) {
+                searchInput.focus();
+                const val = searchInput.value;
+                searchInput.value = ''; searchInput.value = val;
+                searchInput.addEventListener('input', (e) => {
+                    pState.search = e.target.value;
+                    pState.currentPage = 1;
+                    debounceSearch(() => window.renderView('patients'), 500);
+                });
+            }
+        } catch (err) {
+            console.error(err);
+            viewContainer.innerHTML = `<div class="error-state">${err.message}</div>`;
+        }
+        return;
     }
     else if (viewName === 'expired') {
         pageTitle.innerText = t('page_expired');
-        const expiredMeds = state.medicines.filter(m => isExpired(m.expiry));
-        
-        content = `
-            <div class="page-header" style="justify-content: flex-end;">
-                <div style="display:flex; gap:10px;">
-                    <button class="primary-btn btn-print" onclick="window.printPage()" style="background:var(--text-muted);"><i class="fa-solid fa-print"></i> ${t('btn_print')}</button>
-                    <button class="primary-btn btn-excel" onclick="window.exportToExcel('expired-table', 'Expired_Stock')" style="background:#059669;"><i class="fa-solid fa-file-excel"></i> ${t('btn_excel')}</button>
+        const p = pagination.expired;
+        const now = new Date().toISOString().split('T')[0];
+
+        try {
+            const { data: meds, total } = await fetchTableData('medicines', {
+                page: p.currentPage,
+                pageSize: p.pageSize,
+                filter: { col: 'expiry_date', val: now, op: 'lt' },
+                order: { col: 'expiry_date', ascending: true }
+            });
+            p.total = total;
+
+            const rows = meds.map(m => `
+                <tr style="background:#fef2f2;">
+                    <td><strong>${m.name}</strong></td>
+                    <td>${m.batch}</td>
+                    <td><span class="status-badge danger">${m.qty}</span></td>
+                    <td style="color:var(--danger-red); font-weight:bold;">${formatDate(m.expiry_date)}</td>
+                    <td><span class="status-badge danger">${t('expired_tag')}</span></td>
+                </tr>
+            `).join('');
+
+            content = `
+                <div class="page-header" style="justify-content: flex-end;">
+                    <div style="display:flex; gap:10px;">
+                        <button class="primary-btn btn-print" onclick="window.printPage()" style="background:var(--text-muted);"><i class="fa-solid fa-print"></i> ${t('btn_print')}</button>
+                        <button class="primary-btn btn-excel" onclick="window.exportToExcel('expired-table', 'Expired_Stock')" style="background:#059669;"><i class="fa-solid fa-file-excel"></i> ${t('btn_excel')}</button>
+                    </div>
                 </div>
-            </div>
-            <div class="table-container">
-                <table id="expired-table">
-                    <thead><tr>
-                        <th>${t('th_med')}</th><th>${t('th_batch')}</th><th>${t('th_qty')}</th><th>${t('th_expiry')}</th><th>${t('th_status')}</th>
-                    </tr></thead>
-                    <tbody>
-                        ${expiredMeds.length > 0 ? expiredMeds.map(m => `
-                            <tr style="background:#fef2f2;">
-                                <td><strong>${m.name}</strong></td>
-                                <td>${m.batch}</td>
-                                <td><span class="status-badge danger">${m.qty}</span></td>
-                                <td style="color:var(--danger-red); font-weight:bold;">${formatDate(m.expiry)}</td>
-                                <td><span class="status-badge danger">${t('expired_tag')}</span></td>
-                            </tr>
-                        `).join('') : `<tr><td colspan="5" style="text-align:center; padding:30px;">Aucun médicament périmé.</td></tr>`}
-                    </tbody>
-                </table>
-            </div>
-        `;
+                <div class="table-container shadow-sm">
+                    <table id="expired-table">
+                        <thead><tr>
+                            <th>${t('th_med')}</th><th>${t('th_batch')}</th><th>${t('th_qty')}</th><th>${t('th_expiry')}</th><th>${t('th_status')}</th>
+                        </tr></thead>
+                        <tbody>
+                            ${rows || `<tr><td colspan="5" style="text-align:center; padding:30px;">Aucun médicament périmé.</td></tr>`}
+                        </tbody>
+                    </table>
+                </div>
+                ${renderPaginationControls('expired')}
+            `;
+            viewContainer.innerHTML = content;
+        } catch (err) {
+            console.error(err);
+            viewContainer.innerHTML = `<div class="error-state">${err.message}</div>`;
+        }
+        return;
     }
     else if (viewName === 'admin_decharges' && currentUser && currentUser.role === 'admin') {
         pageTitle.innerText = "Décharges (Historique)";
@@ -2175,46 +2299,70 @@ window.renderView = function(viewName) {
                 </table>
             </div>
         `;
-    }
+    } 
     else if (viewName === 'records') {
         pageTitle.innerText = t('page_records');
-        const allLogs = [];
-        state.transfers.forEach(tItem => {
-            const actionTrans = tItem.isReturn ? (currentLang==='ar'?'إرجاع للمركزي':'Retour Central') : t('action_transfer');
-            const qtyStr = tItem.isReturn ? `-${tItem.qty} (عودة)` : `+${tItem.qty}`;
-            allLogs.push({ ref: `TRN-${tItem.id}`, date: tItem.date, action: actionTrans, med: tItem.medName, qty: qtyStr, dest: state.pharmacies[tItem.toPharmacy]?.name[currentLang] || '-', worker: window.parseWorkerName(tItem.dispensedBy, currentLang) });
-        });
-        state.dispensations.forEach(d => {
-            allLogs.push({ ref: d.reference, date: d.date, action: t('action_dispense'), med: d.medName, qty: `-${d.qty}`, dest: d.patientName, worker: window.parseWorkerName(d.dispensedBy, currentLang) });
-        });
-        allLogs.sort((a,b) => new Date(b.date) - new Date(a.date));
+        const p = pagination.records;
 
-        const rRows = allLogs.map(log => `
-            <tr>
-                <td><small><strong>${log.ref || '-'}</strong></small></td>
-                <td>${formatDate(log.date)}</td>
-                <td><span class="status-badge ${log.qty.startsWith('+') ? 'good' : 'warning'}">${log.action}</span></td>
-                <td><strong>${log.med}</strong></td>
-                <td><span dir="ltr">${log.qty}</span></td>
-                <td>${log.dest}</td>
-                <td>${log.worker}</td>
-            </tr>
-        `).join('');
+        try {
+            const { data: logs, total } = await fetchTableData('dispensations', {
+                page: p.currentPage,
+                pageSize: p.pageSize,
+                search: p.search,
+                searchCol: 'med_name',
+                order: { col: 'date', ascending: false }
+            });
+            p.total = total;
 
-        content = `
-            <div class="page-header" style="justify-content: flex-end;">
-                <div style="display:flex; gap: 10px;">
-                    <button class="primary-btn btn-print" onclick="window.printPage()" style="background:var(--text-muted);"><i class="fa-solid fa-print"></i> ${t('btn_print')}</button>
-                    <button class="primary-btn btn-excel" onclick="window.exportToExcel('records-table', 'Records')" style="background:#059669;"><i class="fa-solid fa-file-excel"></i> ${t('btn_excel')}</button>
+            const rRows = logs.map(d => `
+                <tr>
+                    <td><small><strong>${d.reference || '-'}</strong></small></td>
+                    <td>${formatDate(d.date)}</td>
+                    <td><span class="status-badge warning">${t('action_dispense')}</span></td>
+                    <td><strong>${d.med_name}</strong></td>
+                    <td><span dir="ltr">-${d.qty}</span></td>
+                    <td>${d.patient_name}</td>
+                    <td>${window.parseWorkerName(d.dispensed_by, currentLang)}</td>
+                </tr>
+            `).join('');
+
+            content = `
+                <div class="page-header" style="justify-content: space-between;">
+                    <div class="search-box">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-record" placeholder="${t('search_placeholder')}" value="${p.search || ''}">
+                    </div>
+                    <div style="display:flex; gap: 10px;">
+                        <button class="primary-btn btn-print" onclick="window.printPage()" style="background:var(--text-muted);"><i class="fa-solid fa-print"></i> ${t('btn_print')}</button>
+                        <button class="primary-btn btn-excel" onclick="window.exportToExcel('records-table', 'Records')" style="background:#059669;"><i class="fa-solid fa-file-excel"></i> ${t('btn_excel')}</button>
+                    </div>
                 </div>
-            </div>
-            <div class="table-container">
-                <table id="records-table">
-                    <thead><tr><th>Réf.</th><th>${t('th_date')}</th><th>${t('th_action')}</th><th>${t('th_med')}</th><th>${t('th_qty')}</th><th>${t('th_pharmacy')}</th><th>${t('th_worker')}</th></tr></thead>
-                    <tbody>${rRows || `<tr><td colspan="7" style="text-align:center;">---</td></tr>`}</tbody>
-                </table>
-            </div>
-        `;
+                <div class="table-container shadow-sm">
+                    <table id="records-table">
+                        <thead><tr><th>Réf.</th><th>${t('th_date')}</th><th>${t('th_action')}</th><th>${t('th_med')}</th><th>${t('th_qty')}</th><th>${t('th_pharmacy')}</th><th>${t('th_worker')}</th></tr></thead>
+                        <tbody>${rRows || `<tr><td colspan="7" style="text-align:center;">---</td></tr>`}</tbody>
+                    </table>
+                </div>
+                ${renderPaginationControls('records')}
+            `;
+            viewContainer.innerHTML = content;
+
+            // Search Listener
+            const searchInput = document.getElementById('search-record');
+            if (searchInput) {
+                searchInput.focus();
+                const val = searchInput.value; searchInput.value = ''; searchInput.value = val;
+                searchInput.addEventListener('input', (e) => {
+                    p.search = e.target.value;
+                    p.currentPage = 1;
+                    debounceSearch(() => window.renderView('records'), 500);
+                });
+            }
+        } catch (err) {
+            console.error(err);
+            viewContainer.innerHTML = `<div class="error-state">${err.message}</div>`;
+        }
+        return;
     }
     else if (viewName === 'reports') {
         pageTitle.innerText = t('page_reports');
@@ -2667,7 +2815,7 @@ function generateCentralTableRows(meds) {
     }).join('');
 }
 
-window.renderPharmacy = function(pharmId, subView = 'all') {
+window.renderPharmacy = async function(pharmId, subView = 'all') {
     const p = state.pharmacies[pharmId];
     pageTitle.innerText = p.name.fr;
     
@@ -2703,6 +2851,25 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
         `;
     }
 
+    // Fetch Paginated Pharmacy Stock
+    const pStockState = pagination.pharmacy_stock;
+    const { data: stockData, total: stockTotal } = await fetchTableData('pharmacy_stock', {
+        page: pStockState.currentPage,
+        pageSize: pStockState.pageSize,
+        filters: { pharmacy_id: pharmId },
+        select: '*, medicines(name, batch, expiry_date)'
+    });
+    pStockState.total = stockTotal;
+    
+    // Map stock for rendering
+    const currentStock = stockData.map(s => ({
+        id: s.medicine_id,
+        name: s.medicines?.name || 'Inconnu',
+        batch: s.medicines?.batch || '-',
+        qty: s.qty,
+        expiry: s.medicines?.expiry_date || '-'
+    }));
+
     const dashboardHeaderHtml = `
         <div class="page-header" style="justify-content: flex-end; gap: 10px;">
             ${isFullAdmin ? `
@@ -2723,20 +2890,17 @@ window.renderPharmacy = function(pharmId, subView = 'all') {
         <!-- Pharmacy Stat Cards -->
         <div class="stat-grid-5" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
             <div class="stat-card sc-green">
-                <div class="stat-val">${p.stock.length}</div>
+                <div class="stat-val">${stockTotal}</div>
                 <div class="stat-label" style="text-transform: none; line-height: 1.4;">
                     <strong>${currentLang === 'ar' ? 'إجمالي الأصناف' : 'Total Articles'}</strong>
-                    <span style="display: block; font-size: 0.7rem; color: #7f8c8d; font-weight: 600;">
-                        ${currentLang === 'ar' ? 'الكمية الإجمالية:' : 'Total Unités:'} ${p.stock.reduce((acc, curr) => acc + curr.qty, 0)}
-                    </span>
                 </div>
             </div>
             <div class="stat-card sc-purple">
-                <div class="stat-val">${state.dispensations.filter(d => d.pharmacyId == pharmId).length}</div>
+                <div class="stat-val">---</div>
                 <div class="stat-label">Délivrances</div>
             </div>
             <div class="stat-card sc-red">
-                <div class="stat-val">${p.stock.filter(m => m.qty <= 10 && m.qty > 0).length}</div>
+                <div class="stat-val">---</div>
                 <div class="stat-label">Stock Faible</div>
             </div>
         </div>
