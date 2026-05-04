@@ -475,8 +475,18 @@ async function loadDataFromSupabase() {
             id: p.id, name: p.name, nationalId: p.national_id, 
             phone: p.phone, hospital: p.hospital 
         }));
-        state.patients.forEach(p => {
-            // Placeholder: increment patient count for their pharmacy (need schema update for patient->pharmacy if desired, for now we keep app logic)
+        // Calculate Pharmacy Stats (Patients and Activity %)
+        const totalDisps = state.dispensations.length;
+        Object.keys(state.pharmacies).forEach(pid => {
+            const pharmacyDisps = state.dispensations.filter(d => d.pharmacyId == pid);
+            const uniquePatients = new Set(pharmacyDisps.map(d => d.patientName));
+            state.pharmacies[pid].patients = uniquePatients.size;
+            
+            if (totalDisps > 0) {
+                state.pharmacies[pid].percent = Math.round((pharmacyDisps.length / totalDisps) * 100);
+            } else {
+                state.pharmacies[pid].percent = 0;
+            }
         });
 
         // Map Orders
