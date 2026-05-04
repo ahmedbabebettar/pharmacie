@@ -476,14 +476,14 @@ async function loadDataFromSupabase() {
             phone: p.phone, hospital: p.hospital 
         }));
         // Calculate Pharmacy Stats (Patients and Activity %)
-        const totalDisps = state.dispensations.length;
+        const totalRegisteredPatients = state.patients.length;
         Object.keys(state.pharmacies).forEach(pid => {
             const pharmacyDisps = state.dispensations.filter(d => d.pharmacyId == pid);
             const uniquePatients = new Set(pharmacyDisps.map(d => d.patientName));
             state.pharmacies[pid].patients = uniquePatients.size;
             
-            if (totalDisps > 0) {
-                state.pharmacies[pid].percent = Math.round((pharmacyDisps.length / totalDisps) * 100);
+            if (totalRegisteredPatients > 0) {
+                state.pharmacies[pid].percent = Math.round((uniquePatients.size / totalRegisteredPatients) * 100);
             } else {
                 state.pharmacies[pid].percent = 0;
             }
