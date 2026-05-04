@@ -1624,42 +1624,7 @@ window.renderView = async function(viewName) {
         }
         return;
     }
-exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supprimer'}
-                    </button>
-                    ` : `
-                    <button class="primary-btn" style="background:#0284c7;" onclick="window.exportCentralStockToExcel()">
-                        <i class="fa-solid fa-file-export"></i> ${currentLang === 'ar' ? 'سحب Excel' : 'Exporter Excel'}
-                    </button>
-                    `}
-                </div>
-                <div class="search-box">
-                    <i class="fa-solid fa-search"></i>
-                    <input type="text" id="search-med" placeholder="${t('search_placeholder')}">
-                </div>
-            </div>
-            
-            <div class="table-container shadow-sm">
-                <table id="central-table">
-                    <thead>
-                        <tr>
-                            ${currentUser && currentUser.role === 'admin' ? `<th><input type="checkbox" id="select-all-meds" onchange="window.toggleAllMeds(this)"></th>` : ''}
-                            <th>${t('th_med')}</th>
-                            
-                            <th>${t('th_batch')}</th>
-                            <th>${t('th_qty')}</th>
-                            <th>${t('th_entry')}</th>
-                            <th>${t('th_expiry')}</th>
-                            <th>${currentLang === 'ar' ? 'سعر الشراء' : 'Prix d\'achat'}</th>
-                            <th>${t('th_status')}</th>
-                            ${currentUser && currentUser.role === 'admin' ? `<th>${t('th_actions')}</th>` : ''}
-                        </tr>
-                    </thead>
-                    <tbody>${generateCentralTableRows(currentMeds)}</tbody>
-                </table>
-            </div>
-            ${renderPaginationControls('central', activeMeds.length)}
-        `;
-    }
+
     else if (viewName === 'distribution') {
         pageTitle.innerText = t('page_distribution');
         const activeMeds = state.medicines.filter(m => !isExpired(m.expiry) && m.qty > 0);
