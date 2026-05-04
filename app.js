@@ -1,4 +1,4 @@
-﻿console.log("APP.JS PARSED - VERSION 42 - SYSTEM READY");
+console.log("APP.JS PARSED - VERSION 42 - SYSTEM READY");
 
 // Translations
 const i18n = {
@@ -405,7 +405,7 @@ async function loadDataFromSupabase() {
         console.log("Fetching data from Supabase...");
         
         // Parallel queries using pagination to bypass the 1000 items API hard cap
-        const [meds, pharms, stocks, trans, disps, pats, ords, remoteReceipts, counters] = await Promise.all([
+        const [meds, pharms, stocks, trans, disps, pats, ords, remoteReceipts, counters, returns] = await Promise.all([
             fetchAllRecords('medicines'),
             _supabase.from('pharmacies').select('*'), // Small enough, no pagination needed
             fetchAllRecords('pharmacy_stock', '*, medicines(*)'),
@@ -414,7 +414,8 @@ async function loadDataFromSupabase() {
             fetchAllRecords('patients'),
             fetchAllRecords('orders'),
             fetchAllRecords('receipts').catch(e => { console.warn('Receipts table missing or empty', e); return { data: null }; }),
-            _supabase.from('app_counters').select('*')
+            _supabase.from('app_counters').select('*'),
+            _supabase.from('return_requests').select('*')
         ]);
 
         if (meds.error) throw meds.error;
@@ -495,6 +496,27 @@ async function loadDataFromSupabase() {
 
         // Map Receipts
         state.receipts = (remoteReceipts && remoteReceipts.data) ? remoteReceipts.data : (JSON.parse(localStorage.getItem('local_receipts')) || []);
+
+        // Map Returns
+        if (returns && returns.data) {
+            state.pendingReturns = returns.data.map(r => ({
+                id: r.id, 
+                pharmacyId: r.pharmacy_id, 
+                medId: r.medicine_id, 
+                medName: r.med_name, 
+                qty: r.qty, 
+                workerName: r.worker_name,
+                status: r.status,
+                date: r.created_at
+            })).filter(r => r.status === 'PENDING');
+            
+            // Also store all returns for history view if needed
+            state.allReturns = returns.data.map(r => ({
+                id: r.id, pharmacyId: r.pharmacy_id, medId: r.medicine_id, 
+                medName: r.med_name, qty: r.qty, workerName: r.worker_name, 
+                status: r.status, date: r.created_at
+            }));
+        }
 
         // Update medicine name suggestions for the "Add Medicine" modal
 
@@ -1866,6 +1888,62 @@ window.renderView = function(viewName) {
                                     </td>
                                 </tr>
                                 `).join('') : `<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:20px;">Aucun historique disponible.</td></tr>`}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    else if (viewName === 'admin_returns' && currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
+        pageTitle.innerText = "Gestion des Retours Stock";
+        
+        const pending = (state.pendingReturns || []).slice().reverse();
+        const history = (state.allReturns || []).filter(r => r.status !== 'PENDING').slice().reverse();
+
+        content = `
+            <div class="dash-row" style="margin-bottom:20px;">
+                <div class="dash-col" style="flex:1; border-top: 4px solid var(--warning-orange);">
+                    <div class="block-title" style="color:var(--warning-orange);"><i class="fa-solid fa-clock"></i> Demandes de retour en attente (${pending.length})</div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Pharmacie</th><th>Médicament</th><th>Quantité</th><th>Émetteur</th><th>Date</th><th>Action</th></tr></thead>
+                            <tbody>
+                                ${pending.length > 0 ? pending.map(r => `
+                                <tr>
+                                    <td>${state.pharmacies[r.pharmacyId]?.name?.fr || 'Pharmacie #'+r.pharmacyId}</td>
+                                    <td><strong>${r.medName}</strong></td>
+                                    <td><span class="status-badge warning">${r.qty}</span></td>
+                                    <td>${window.parseWorkerName(r.workerName, 'fr')}</td>
+                                    <td>${formatDate(r.date)}</td>
+                                    <td style="display:flex; gap:5px;">
+                                        <button class="primary-btn" style="padding:4px 8px; font-size:12px; background:#059669;" onclick="window.approveReturn(${r.id})">${t('btn_approve')}</button>
+                                        <button class="primary-btn" style="padding:4px 8px; font-size:12px; background:#ef4444;" onclick="window.rejectReturn(${r.id})">${t('btn_reject')}</button>
+                                    </td>
+                                </tr>
+                                `).join('') : `<tr><td colspan="6" style="text-align:center; color:#94a3b8; padding:20px;">Aucune demande en attente.</td></tr>`}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dash-row">
+                <div class="dash-col" style="flex:1; border-top: 4px solid #94a3b8;">
+                    <div class="block-title" style="color:#64748b;"><i class="fa-solid fa-clock-rotate-left"></i> Historique des retours (Traités/Refusés)</div>
+                    <div class="table-container shadow-sm">
+                        <table>
+                            <thead><tr><th>Date</th><th>Pharmacie</th><th>Médicament</th><th>Quantité</th><th>Statut</th></tr></thead>
+                            <tbody>
+                                ${history.length > 0 ? history.map(r => `
+                                <tr>
+                                    <td>${formatDate(r.date)}</td>
+                                    <td>${state.pharmacies[r.pharmacyId]?.name?.fr || 'Pharmacie #'+r.pharmacyId}</td>
+                                    <td><strong>${r.medName}</strong></td>
+                                    <td>${r.qty}</td>
+                                    <td><span class="status-badge ${r.status === 'APPROVED' ? 'good' : 'bad'}">${r.status}</span></td>
+                                </tr>
+                                `).join('') : `<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:20px;">Aucun historique.</td></tr>`}
                             </tbody>
                         </table>
                     </div>
@@ -3270,60 +3348,98 @@ window.returnToCentral = async function(pharmId, medId) {
         return;
     }
     
-    const newReqId = state.pendingReturns.length > 0 ? Math.max(...state.pendingReturns.map(r => r.id)) + 1 : 1;
-    state.pendingReturns.push({
-        id: newReqId,
-        pharmacyId: pharmId,
-        medId: medId,
-        medName: med.name,
-        qty: qty,
-        workerName: currentUser ? currentUser.name : {ar:'النظام', fr:'Système'}
-    });
+    const workerName = currentUser ? (typeof currentUser.name === 'object' ? (currentUser.name.fr || currentUser.name.ar) : currentUser.name) : 'Système';
     
-    saveState();
-    await window.showCustomDialog({ title: "Succès", msg: t('alert_request_sent'), icon: 'fa-circle-check' });
+    try {
+        const { error } = await _supabase.from('return_requests').insert([{
+            pharmacy_id: pharmId,
+            medicine_id: medId,
+            med_name: med.name,
+            qty: qty,
+            worker_name: workerName,
+            status: 'PENDING'
+        }]);
+
+        if (error) throw error;
+        
+        await loadDataFromSupabase();
+        await window.showCustomDialog({ title: "Succès", msg: t('alert_request_sent'), icon: 'fa-circle-check' });
+        
+        // Refresh view
+        if (currentUser.role === 'pharmacy') {
+            window.renderPharmacy(pharmId, 'all');
+        } else {
+            window.renderView(activeView);
+        }
+    } catch (err) {
+        console.error(err);
+        window.showToast("Erreur lors de l'envoi de la demande: " + err.message, "error");
+    }
 };
 
 window.approveReturn = async function(reqId) {
-    const reqIndex = state.pendingReturns.findIndex(r => r.id === reqId);
-    if(reqIndex === -1) return;
-    const req = state.pendingReturns[reqIndex];
+    const req = (state.allReturns || []).find(r => r.id === reqId);
+    if(!req) return;
     
-    const p = state.pharmacies[req.pharmacyId];
-    const med = p.stock.find(m => m.id === req.medId);
-    if(med && med.qty >= req.qty) {
-        med.qty -= req.qty;
-    } else {
-        await window.showCustomDialog({ title: "Erreur", msg: t('alert_error'), icon: "fa-circle-xclamation" });
-        return;
+    try {
+        window.showToast("Traitement en cours...", "info");
+        
+        // 1. Check current pharmacy stock
+        const { data: ps, error: psError } = await _supabase
+            .from('pharmacy_stock')
+            .select('qty')
+            .eq('pharmacy_id', req.pharmacyId)
+            .eq('medicine_id', req.medId)
+            .single();
+            
+        if (psError || !ps || ps.qty < req.qty) {
+            await window.showCustomDialog({ title: "Erreur", msg: "Stock insuffisant en pharmacie pour valider ce retour.", icon: "fa-circle-xclamation" });
+            return;
+        }
+
+        // 2. Atomic Updates
+        // A. Reduce Pharmacy Stock
+        await _supabase.from('pharmacy_stock').update({ qty: ps.qty - req.qty }).eq('pharmacy_id', req.pharmacyId).eq('medicine_id', req.medId);
+        
+        // B. Increase Central Stock
+        const { data: medData } = await _supabase.from('medicines').select('qty').eq('id', req.medId).single();
+        if (medData) {
+            await _supabase.from('medicines').update({ qty: medData.qty + req.qty }).eq('id', req.medId);
+        }
+
+        // C. Record Transfer
+        await _supabase.from('transfers').insert([{
+            date: new Date().toISOString(),
+            medicine_id: req.medId,
+            medicine_name: req.medName,
+            qty: req.qty,
+            to_pharmacy_id: req.pharmacyId,
+            is_return: true,
+            dispensed_by: req.workerName
+        }]);
+
+        // D. Mark Request as APPROVED
+        await _supabase.from('return_requests').update({ status: 'APPROVED' }).eq('id', reqId);
+        
+        await loadDataFromSupabase();
+        window.showToast("Retour approuvé avec succès");
+        window.renderView(activeView);
+    } catch (err) {
+        console.error(err);
+        window.showToast("Erreur critique: " + err.message, "error");
     }
-    
-    const cMed = state.medicines.find(m => m.id === req.medId);
-    if(cMed) {
-        cMed.qty += req.qty;
-    } else {
-        const newId = state.medicines.length > 0 ? Math.max(...state.medicines.map(m => m.id)) + 1 : 1;
-        state.medicines.push({ id: newId, name: req.medName, batch: 'RET', qty: req.qty, entryDate: new Date().toISOString().split('T')[0], expiry: '-' });
-    }
-    
-    state.transfers.push({
-        id: state.transfers.length + 1000,
-        date: new Date().toISOString().split('T')[0],
-        medId: req.medId, medName: req.medName, qty: req.qty,
-        toPharmacy: req.pharmacyId,
-        isReturn: true,
-        dispensedBy: req.workerName
-    });
-    
-    state.pendingReturns.splice(reqIndex, 1);
-    saveState();
-    window.renderView('dashboard');
 };
 
-window.rejectReturn = function(reqId) {
-    state.pendingReturns = state.pendingReturns.filter(r => r.id !== reqId);
-    saveState();
-    window.renderView('dashboard');
+window.rejectReturn = async function(reqId) {
+    try {
+        await _supabase.from('return_requests').update({ status: 'REJECTED' }).eq('id', reqId);
+        await loadDataFromSupabase();
+        window.showToast("Demande rejetée");
+        window.renderView(activeView);
+    } catch (err) {
+        console.error(err);
+        window.showToast("Erreur", "error");
+    }
 };
 
 window.markOrderTreated = async function(orderId) {
