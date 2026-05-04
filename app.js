@@ -1117,7 +1117,7 @@ window.attemptLogin = async function() {
 };
     document.addEventListener('DOMContentLoaded', () => {
     navButtons.forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        btn.addEventListener('click', async (e) => {
             navButtons.forEach(b => b.classList.remove('active'));
             e.currentTarget.classList.add('active');
             
