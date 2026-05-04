@@ -480,7 +480,7 @@ async function loadDataFromSupabase() {
         const [pharms, counters, returns, totalMeds, totalPats, totalTrans, totalDisps, totalExpired] = await Promise.all([
             _supabase.from('pharmacies').select('*'),
             _supabase.from('app_counters').select('*'),
-            _supabase.from('return_requests').select('*').eq('status', 'PENDING'),
+            _supabase.from('return_requests').select('*').eq('status', 'PENDING').order('id', { ascending: false }).limit(100),
             _supabase.from('medicines').select('id', { count: 'exact', head: true }),
             _supabase.from('patients').select('id', { count: 'exact', head: true }),
             _supabase.from('transfers').select('id', { count: 'exact', head: true }),
@@ -1926,7 +1926,9 @@ exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supp
                     localStorage.setItem('local_receipts', JSON.stringify(state.receipts));
                 }
 
-                await loadDataFromSupabase(); // Sync back
+                // Targeted state update: only update stats counter, no full reload needed
+                if (state.stats) state.stats.totalDistributions = (state.stats.totalDistributions || 0) + batch.length;
+                state.transfers = [{ date: new Date().toISOString().split('T')[0], medName: batch[0]?.medName, qty: batch[0]?.qty, toPharmacy: pharmId, isReturn: false }].concat(state.transfers).slice(0, 6);
                 window.showToast(t('alert_success'));
                 await window.autoDownloadReceipt('DISTRIBUTION', state.pharmacies[pharmId].name.fr, batch, barcode);
                 window.renderView('distribution');
@@ -3232,27 +3234,33 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
             if(!valid || items.length === 0) return;
 
-            // --- REGLE DES 28 JOURS (28 DAYS RULE) ---
+            // --- REGLE DES 28 JOURS — Direct Supabase Query (scalable) ---
             const twentyEightDaysAgo = new Date();
             twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
             
-            for (const item of items) {
-                const recentDisps = state.dispensations
-                    .filter(d => d.patientName === patientName && d.medName === item.medName && new Date(d.date) >= twentyEightDaysAgo)
-                    .sort((a,b) => new Date(b.date) - new Date(a.date));
+            if (!window._isExceptional) {
+                // Run all 28-day checks in parallel (one query per medicine)
+                const checks = items.map(item =>
+                    _supabase.from('dispensations')
+                        .select('date', { count: 'exact', head: false })
+                        .eq('patient_name', patientName)
+                        .eq('medicine_name', item.medName)
+                        .gte('date', twentyEightDaysAgo.toISOString())
+                        .order('date', { ascending: false })
+                        .limit(1)
+                        .then(res => ({ item, data: res.data, error: res.error }))
+                );
+                const checkResults = await Promise.all(checks);
 
-                if (recentDisps.length > 0) {
-                    const lastDispDate = new Date(recentDisps[0].date).toLocaleDateString();
-                    if (window._isExceptional && currentUser && currentUser.role === 'admin') {
-                        // Admin clicked exceptional dispense
-                        window.showToast(currentLang === 'ar' ? 'تم تجاوز حاجز الـ 28 يوماً استثنائياً' : 'Délivrance exceptionnelle approuvée', 'info');
-                    } else {
-                        // Everyone else (and Admin on normal button) gets completely blocked
+                for (const result of checkResults) {
+                    if (result.error) { console.warn('28-day check error:', result.error); continue; }
+                    if (result.data && result.data.length > 0) {
+                        const lastDispDate = new Date(result.data[0].date).toLocaleDateString('fr-FR');
                         await window.showCustomDialog({
                             title: currentLang === 'ar' ? 'مرفوض: قاعدة الـ 28 يوماً' : "Délivrance Refusée",
                             msg: currentLang === 'ar'
-                                ? `عفواً، المريض "${patientName}" استلم دواء "${item.medName}" حديثاً بتاريخ ${lastDispDate}.\nيجب مرور 28 يوماً كاملة قبل الصرف مجدداً لنفس الدواء.`
-                                : `Échec: ${patientName} a pris "${item.medName}" le ${lastDispDate}.\n28 jours doivent s'écouler.`,
+                                ? `عفواً، المريض "${patientName}" استلم دواء "${result.item.medName}" حديثاً بتاريخ ${lastDispDate}.\nيجب مرور 28 يوماً كاملة قبل الصرف مجدداً لنفس الدواء.`
+                                : `Échec: ${patientName} a reçu "${result.item.medName}" le ${lastDispDate}.\n28 jours doivent s'écouler.`,
                             type: 'alert',
                             icon: 'fa-ban'
                         });
@@ -3260,6 +3268,8 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                         break;
                     }
                 }
+            } else {
+                window.showToast(currentLang === 'ar' ? 'تم تجاوز حاجز الـ 28 يوماً استثنائياً' : 'Délivrance exceptionnelle approuvée', 'info');
             }
 
             // Always reset the override flag
@@ -3270,28 +3280,48 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
             try {
                 const barcode = await window.getNextCounterValue('dispense');
+                const nowIso = new Date().toISOString();
+                const workerName = currentUser ? (typeof currentUser.name === 'object' ? currentUser.name.fr : currentUser.name) : 'Staff';
 
-                for (const item of items) {
+                // --- BULK OPERATIONS (2 requests total, regardless of medicine count) ---
+
+                // 1. Bulk insert all dispensation records at once
+                const dispensationRecords = items.map(item => ({
+                    date: nowIso,
+                    patient_name: patientName,
+                    medicine_id: item.medId,
+                    medicine_name: item.medName,
+                    qty: item.qty,
+                    pharmacy_id: pharmId,
+                    dispensed_by: workerName,
+                    reference: barcode
+                }));
+                const { error: dispErr } = await _supabase.from('dispensations').insert(dispensationRecords);
+                if (dispErr) throw dispErr;
+
+                // 2. Bulk upsert pharmacy stock (calculate new qty from local p.stock cache)
+                const stockUpdates = items.map(item => {
                     const med = p.stock.find(m => m.id === item.medId);
-                    const newQty = med.qty - item.qty;
-                    await _supabase.from('pharmacy_stock').update({ qty: newQty }).eq('pharmacy_id', pharmId).eq('medicine_id', item.medId);
-
-                    await _supabase.from('dispensations').insert([{
-                        date: new Date().toISOString(),
-                        patient_name: patientName,
-                        medicine_id: item.medId,
-                        medicine_name: item.medName,
-                        qty: item.qty,
+                    return {
                         pharmacy_id: pharmId,
-                        dispensed_by: currentUser ? (typeof currentUser.name === 'object' ? currentUser.name.fr : currentUser.name) : 'Staff',
-                        reference: barcode
-                    }]);
-                }
-                
-                await loadDataFromSupabase();
+                        medicine_id: item.medId,
+                        qty: Math.max(0, (med ? med.qty : 0) - item.qty)
+                    };
+                });
+                const { error: stockErr } = await _supabase
+                    .from('pharmacy_stock')
+                    .upsert(stockUpdates, { onConflict: 'pharmacy_id,medicine_id' });
+                if (stockErr) throw stockErr;
+
+                // 3. Update local pharmacy stock state (no full reload needed)
+                items.forEach(item => {
+                    const med = p.stock.find(m => m.id === item.medId);
+                    if (med) med.qty = Math.max(0, med.qty - item.qty);
+                });
+
                 await window.showCustomDialog({ title: "Succès", msg: t('alert_success'), icon: "fa-circle-check" });
                 await window.autoDownloadReceipt('DELIVRANCE', patientName, items, barcode);
-                window.renderPharmacy(pharmId, 'pharm-dispense');
+                await window.renderPharmacy(pharmId, 'pharm-dispense');
             } catch (err) {
                 console.error(err);
                 window.showToast("Erreur lors de la délivrance", "error");
