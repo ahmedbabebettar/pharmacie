@@ -2896,7 +2896,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }));
 
     // Fetch counts and history
-    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}] = await Promise.all([
+    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}, {data: searchableStockData}] = await Promise.all([
         _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).lt('qty', 50),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).filter('medicine_id', 'in', 
@@ -2908,9 +2908,18 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             filters: { pharmacy_id: pharmId },
             order: { col: 'date', ascending: false }
         }),
-        _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(200),
-        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(200)
+        _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(1000),
+        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(1000),
+        _supabase.from('pharmacy_stock').select('qty, medicines(id, name, batch, expiry_date)').eq('pharmacy_id', pharmId).gt('qty', 0).limit(2000)
     ]);
+
+    const searchableStock = (searchableStockData || []).map(s => ({
+        id: s.medicines?.id,
+        name: s.medicines?.name || 'Inconnu',
+        batch: s.medicines?.batch || '-',
+        qty: s.qty,
+        expiry: s.medicines?.expiry_date || '-'
+    }));
 
     const dashboardHeaderHtml = `
         <div class="page-header" style="justify-content: flex-end; gap: 10px;">
@@ -3013,7 +3022,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     </table>
                 </div>
                 <datalist id="disp-meds-list-${pharmId}">
-                    ${currentStock.filter(m => m.qty > 0 && !isExpired(m.expiry)).map(m => `<option value="${m.name} [${m.batch}] (Stock: ${m.qty})" data-id="${m.id}"></option>`).join('')}
+                    ${searchableStock.filter(m => !isExpired(m.expiry)).map(m => `<option value="${m.name} [${m.batch}] (Stock: ${m.qty})" data-id="${m.id}"></option>`).join('')}
                 </datalist>
 
                 <div style="display:flex; justify-content: space-between; align-items: center;">
