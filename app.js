@@ -637,10 +637,10 @@ window.importPharmacyStock = async function(event, pharmId) {
             const firstRow = rawRows[0];
             for (let i = 0; i < firstRow.length; i++) {
                 let v = String(firstRow[i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                if (v.includes('med') || v.includes('nom') || v.includes('name') || v.includes('article') || v.includes('design')) { nameIdx = i; headerFound = true; }
-                else if (v.includes('lot') || v.includes('batch')) { batchIdx = i; headerFound = true; }
-                else if (v.includes('qty') || v.includes('qte') || v.includes('quant')) { qtyIdx = i; headerFound = true; }
-                else if (v.includes('exp') || v.includes('perem')) { expIdx = i; headerFound = true; }
+                if (v.includes('med') || v.includes('nom') || v.includes('name') || v.includes('article') || v.includes('designation') || v.includes('اسم') || v.includes('دواء')) { nameIdx = i; headerFound = true; }
+                else if (v.includes('lot') || v.includes('batch') || v.includes('tashgil') || v.includes('تشغيل') || v.includes('لوت')) { batchIdx = i; headerFound = true; }
+                else if (v.includes('qty') || v.includes('qte') || v.includes('quant') || v.includes('stock') || v.includes('كمية')) { qtyIdx = i; headerFound = true; }
+                else if (v.includes('exp') || v.includes('perem') || v.includes('انتهاء') || v.includes('صلاحية')) { expIdx = i; headerFound = true; }
             }
             if (headerFound) startIndex = 1;
 
@@ -2805,12 +2805,12 @@ window.handleCentralImport = async function(e) {
             if (rawRows.length > 0) {
                 for (let i = 0; i < rawRows[0].length; i++) {
                     let val = String(rawRows[0][i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                    if (val.includes('name') || val.includes('dawa') || val.includes('med') || val.includes('nom') || val.includes('design') || val.includes('article')) { hasHeaders = true; nameIdx = i; }
-                    else if (val.includes('batch') || val.includes('lot') || val.includes('tashgil')) { hasHeaders = true; batchIdx = i; }
-                    else if (val.includes('qty') || val.includes('quant') || val.includes('qte')) { hasHeaders = true; qtyIdx = i; }
+                    if (val.includes('name') || val.includes('dawa') || val.includes('med') || val.includes('nom') || val.includes('design') || val.includes('article') || val.includes('اسم')) { hasHeaders = true; nameIdx = i; }
+                    else if (val.includes('batch') || val.includes('lot') || val.includes('tashgil') || val.includes('تشغيل')) { hasHeaders = true; batchIdx = i; }
+                    else if (val.includes('qty') || val.includes('quant') || val.includes('qte') || val.includes('stock') || val.includes('كمية')) { hasHeaders = true; qtyIdx = i; }
                     else if ((val.includes('entry') || val.includes('date')) && !val.includes('exp') && !val.includes('perem')) { hasHeaders = true; entryIdx = i; }
-                    else if (val.includes('exp') || val.includes('perem')) { hasHeaders = true; expIdx = i; }
-                    else if (val.includes('price') || val.includes('prix') || val.includes('achat')) { hasHeaders = true; priceIdx = i; }
+                    else if (val.includes('exp') || val.includes('perem') || val.includes('انتهاء')) { hasHeaders = true; expIdx = i; }
+                    else if (val.includes('price') || val.includes('prix') || val.includes('achat') || val.includes('سعر')) { hasHeaders = true; priceIdx = i; }
                 }
             }
 
