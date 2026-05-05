@@ -413,6 +413,12 @@ async function fetchTableData(table, { page = 1, pageSize = 25, search = '', sea
         } else if (table === 'pharmacy_stock') {
             // Search in joined medicines table (Name and Batch)
             query = query.or(`name.ilike.%${search}%,batch.ilike.%${search}%`, { foreignTable: 'medicines' });
+        } else if (table === 'dispensations') {
+            // Search in med name, patient name or reference
+            query = query.or(`medicine_name.ilike.%${search}%,patient_name.ilike.%${search}%,reference.ilike.%${search}%`);
+        } else if (table === 'transfers') {
+            // Search in med name or target pharmacy (manual search might be needed for joins)
+            query = query.or(`medicine_name.ilike.%${search}%,dispensed_by.ilike.%${search}%`);
         } else {
             query = query.ilike(searchCol, `%${search}%`);
         }
@@ -1702,8 +1708,14 @@ window.renderView = async function(viewName) {
             </div>
             ` : ''}
 
-            <div class="table-container">
-                <div class="table-header">${t('history_dist')}</div>
+            <div class="table-container shadow-sm">
+                <div class="table-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>${t('history_dist')}</span>
+                    <div class="search-box" style="margin:0; width:250px;">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-dist-history" placeholder="${t('search_placeholder')}" value="${pagination.transfers.search || ''}">
+                    </div>
+                </div>
                 <table>
                     <thead>
                         <tr>
@@ -1730,6 +1742,18 @@ window.renderView = async function(viewName) {
         `;
         
         viewContainer.innerHTML = content;
+        
+        // Search Listener for Distribution History
+        const distSearchInput = document.getElementById('search-dist-history');
+        if (distSearchInput) {
+            distSearchInput.focus();
+            const val = distSearchInput.value; distSearchInput.value = ''; distSearchInput.value = val;
+            distSearchInput.addEventListener('input', (e) => {
+                pagination.transfers.search = e.target.value;
+                pagination.transfers.currentPage = 1;
+                debounceSearch(() => window.renderView('distribution'), 500);
+            });
+        }
         
         // Add first row automatically
         window.addDistRow = function() {
@@ -2178,6 +2202,7 @@ window.renderView = async function(viewName) {
             const { data: meds, total } = await fetchTableData('medicines', {
                 page: p.currentPage,
                 pageSize: p.pageSize,
+                search: p.search,
                 filters: { expiry_date: { val: now, op: 'lt' } },
                 order: { col: 'expiry_date', ascending: true }
             });
@@ -2194,7 +2219,11 @@ window.renderView = async function(viewName) {
             `).join('');
 
             content = `
-                <div class="page-header" style="justify-content: flex-end;">
+                <div class="page-header" style="justify-content: space-between;">
+                    <div class="search-box">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-expired" placeholder="${t('search_placeholder')}" value="${p.search || ''}">
+                    </div>
                     <div style="display:flex; gap:10px;">
                         <button class="primary-btn btn-print" onclick="window.printPage()" style="background:var(--text-muted);"><i class="fa-solid fa-print"></i> ${t('btn_print')}</button>
                         <button class="primary-btn btn-excel" onclick="window.exportToExcel('expired-table', 'Expired_Stock')" style="background:#059669;"><i class="fa-solid fa-file-excel"></i> ${t('btn_excel')}</button>
@@ -2213,6 +2242,19 @@ window.renderView = async function(viewName) {
                 ${renderPaginationControls('expired')}
             `;
             viewContainer.innerHTML = content;
+
+            // Search Listener for Expired
+            const expSearchInput = document.getElementById('search-expired');
+            if (expSearchInput) {
+                expSearchInput.focus();
+                const val = expSearchInput.value;
+                expSearchInput.value = ''; expSearchInput.value = val;
+                expSearchInput.addEventListener('input', (e) => {
+                    p.search = e.target.value;
+                    p.currentPage = 1;
+                    debounceSearch(() => window.renderView('expired'), 500);
+                });
+            }
         } catch (err) {
             console.error(err);
             viewContainer.innerHTML = `<div class="error-state">${err.message}</div>`;
@@ -2419,7 +2461,8 @@ window.renderView = async function(viewName) {
         else if (timeframe === 'year') startDate.setFullYear(startDate.getFullYear() - 1); // Show last year
         
         const isoStart = startDate.toISOString().split('T')[0];
-        const { data: reportData } = await _supabase.from('dispensations').select('*').gte('date', isoStart);
+        // SCALABILITY: Fetch a larger batch for analytics (up to 10,000 records)
+        const { data: reportData } = await _supabase.from('dispensations').select('*').gte('date', isoStart).limit(10000);
         const dispensations = reportData || [];
 
         // Grouping 1 (By Pharmacy)
@@ -3291,14 +3334,28 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         dispForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const patientInput = document.getElementById(`disp-patient-${pharmId}`).value.trim();
-            const matchedPatient = state.patients.length > 0 ? state.patients.find(pt => 
-                patientInput === `${pt.name} (${pt.nationalId})` || 
-                patientInput === pt.name ||
-                patientInput === pt.nationalId
-            ) : null;
+            
+            // Scalability: Fetch patient from DB instead of relying on potentially incomplete state.patients
+            let matchedPatient = null;
+            if (patientInput) {
+                const { data: ptData } = await _supabase.from('patients')
+                    .select('*')
+                    .or(`name.eq."${patientInput}",national_id.eq."${patientInput}"`)
+                    .limit(1);
+                if (ptData && ptData.length > 0) matchedPatient = ptData[0];
+            }
 
-            if (state.patients.length > 0 && !matchedPatient) {
-                window.showToast(t('error_unregistered_patient') || "Patient introuvable dans le système", 'error');
+            if (!matchedPatient) {
+                // If not found by exact match, try a more flexible check if the input format is "Name (ID)"
+                if (patientInput.includes(' (')) {
+                    const namePart = patientInput.split(' (')[0];
+                    const { data: ptData2 } = await _supabase.from('patients').select('*').eq('name', namePart).limit(1);
+                    if (ptData2 && ptData2.length > 0) matchedPatient = ptData2[0];
+                }
+            }
+
+            if (!matchedPatient) {
+                window.showToast(t('error_unregistered_patient') || "Patient introuvable dans le système. Veuillez d'abord l'enregistrer.", 'error');
                 return;
             }
             
@@ -3406,7 +3463,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 const checks = items.map(item =>
                     _supabase.from('dispensations')
                         .select('date', { count: 'exact', head: false })
-                        .eq('patient_name', patientName)
+                        .ilike('patient_name', patientName) // Case-insensitive match
                         .eq('medicine_name', item.medName)
                         .gte('date', twentyEightDaysAgo.toISOString())
                         .order('date', { ascending: false })
