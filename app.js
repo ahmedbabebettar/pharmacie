@@ -4816,40 +4816,64 @@ window.consolidateStock = async function() {
 };
 
 window.checkAndShowOrphanRepair = async function() {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || currentUser.role !== 'admin') {
+        console.log("Repair tool skipped: User is not admin or not logged in.");
+        return;
+    }
+    
+    console.log("Checking for orphans in pharmacy_stock...");
     
     const container = document.getElementById('orphan-repair-container');
     const list = document.getElementById('orphan-repair-list');
-    if (!container || !list) return;
-
-    // Efficiently find orphans: stock IDs that don't exist in medicines table
-    const { data: allStock } = await _supabase.from('pharmacy_stock').select('medicine_id');
-    const { data: allMeds } = await _supabase.from('medicines').select('id');
-    const medIds = new Set((allMeds || []).map(m => m.id));
-    const orphans = Array.from(new Set((allStock || []).map(s => s.medicine_id).filter(id => id && !medIds.has(id))));
-
-    if (orphans.length === 0) {
-        container.style.display = 'none';
+    if (!container || !list) {
+        console.log("Repair tool skipped: Container not found in DOM.");
         return;
     }
 
-    container.style.display = 'block';
-    
-    // Get all valid medicines for the dropdown
-    const { data: validMeds } = await _supabase.from('medicines').select('id, name, batch').order('name');
-    const optionsHtml = (validMeds || []).map(m => `<option value="${m.id}">${m.name} [${m.batch}]</option>`).join('');
+    try {
+        // 1. Fetch all unique medicine_ids from pharmacy_stock
+        const { data: stockItems, error: stockErr } = await _supabase.from('pharmacy_stock').select('medicine_id');
+        if (stockErr) throw stockErr;
+        
+        const stockIds = Array.from(new Set(stockItems.map(s => s.medicine_id).filter(id => id)));
+        
+        // 2. Fetch all existing medicine IDs
+        const { data: medItems, error: medErr } = await _supabase.from('medicines').select('id');
+        if (medErr) throw medErr;
+        
+        const medIds = new Set(medItems.map(m => m.id));
+        
+        // 3. Identify orphans (IDs in stock but not in medicines)
+        const orphans = stockIds.filter(id => !medIds.has(id));
+        
+        console.log("Orphans detected:", orphans);
 
-    list.innerHTML = orphans.map(id => `
-        <div style="display:flex; align-items:center; gap:10px; padding:10px; background:#fff; border-radius:8px; border:1px solid #fecaca; margin-bottom:5px;">
-            <span style="font-weight:bold; color:#ef4444; min-width:120px;">Réf: ${id} (Inconnu)</span>
-            <i class="fa-solid fa-arrow-right" style="color:#94a3b8;"></i>
-            <select id="repair-select-${id}" style="flex:1; padding:8px; border-radius:6px; border:1px solid #d1d5db;">
-                <option value="">-- اختر الدواء الصحيح من القائمة --</option>
-                ${optionsHtml}
-            </select>
-            <button class="icon-btn" style="background:#059669; color:white; width:auto; padding:8px 15px; border-radius:6px;" onclick="window.repairOrphan(${id})">إصلاح</button>
-        </div>
-    `).join('');
+        if (orphans.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'block';
+        
+        // 4. Get all valid medicines for the dropdown
+        const { data: validMeds } = await _supabase.from('medicines').select('id, name, batch').order('name');
+        const optionsHtml = (validMeds || []).map(m => `<option value="${m.id}">${m.name} [${m.batch}]</option>`).join('');
+
+        list.innerHTML = orphans.map(id => `
+            <div style="display:flex; align-items:center; gap:10px; padding:12px; background:#fff; border-radius:10px; border:1px solid #fecaca; margin-bottom:8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <span style="font-weight:bold; color:#ef4444; min-width:120px; font-size:16px;">Réf: ${id}</span>
+                <i class="fa-solid fa-arrow-right" style="color:#94a3b8;"></i>
+                <select id="repair-select-${id}" style="flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; background:#f9fafb;">
+                    <option value="">-- اختر الدواء الصحيح من القائمة --</option>
+                    ${optionsHtml}
+                </select>
+                <button class="primary-btn" style="background:#059669; color:white; width:auto; padding:10px 20px; border-radius:8px; font-weight:bold;" onclick="window.repairOrphan(${id})">إصلاح ودمج</button>
+            </div>
+        `).join('');
+        
+    } catch (err) {
+        console.error("Orphan check failed:", err);
+    }
 };
 
 window.repairOrphan = async function(oldId) {
