@@ -2951,11 +2951,11 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }));
 
     // Fetch counts and history
-    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}, {data: searchableStockData}] = await Promise.all([
+    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: searchableStockData}] = await Promise.all([
         _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).lt('qty', 50),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).filter('medicine_id', 'in', 
-            (await _supabase.from('medicines').select('id').lt('expiry_date', new Date().toISOString().split('T')[0])).data.map(m => m.id)
+            (await _supabase.from('medicines').select('id').lt('expiry_date', new Date().toISOString().split('T')[0])).data?.map(m => m.id) || []
         ),
         fetchTableData('dispensations', { 
             page: pagination.dispensations.currentPage, 
