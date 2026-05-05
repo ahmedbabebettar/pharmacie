@@ -1323,7 +1323,7 @@ window.renderView = async function(viewName) {
     activeView = viewName;
     const viewContainer = document.getElementById('view-container');
     const pageTitle = document.getElementById('page-title');
-    const t = window.translations[currentLang];
+
     
     // Show loading indicator
     viewContainer.innerHTML = `<div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:100px; color:var(--primary-brand);">
