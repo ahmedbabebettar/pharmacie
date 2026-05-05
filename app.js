@@ -3221,6 +3221,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         const isLow = m.qty < 50;
         return `
             <tr class="${isExp ? 'expired-row' : ''}">
+                ${isFullAdmin ? `<td style="padding: 16px; text-align:center;"><input type="checkbox" class="pharm-stock-checkbox-${pharmId}" value="${m.id}" style="width:18px; height:18px; cursor:pointer;"></td>` : ''}
                 <td style="padding: 16px;">
                     <div style="font-weight:700; color:var(--primary-brand); font-size:1.05rem;">${m.name}</div>
                     <div style="font-size:0.8rem; color:#64748b; margin-top:2px;">Réf: ${m.id}</div>
@@ -3263,15 +3264,23 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                         <div style="font-size:0.85rem; color:#94a3b8; font-weight:400;">${stockTotal} ${currentLang==='ar'?'دواء مسجل':'articles enregistrés'}</div>
                     </div>
                 </div>
-                <div class="search-box" style="margin:0; width:350px; background:#f8fafc;">
-                    <i class="fa-solid fa-search"></i>
-                    <input type="text" id="search-pharm-stock-main" placeholder="${t('search_placeholder')}" value="${pStockState.search || ''}" style="background:transparent; border:none;">
+                <div style="display:flex; gap:15px; align-items:center;">
+                    ${isFullAdmin ? `
+                    <button class="primary-btn" style="background:var(--danger-red); font-size:0.85rem; padding:8px 15px;" onclick="window.deleteSelectedPharmacyStock(${pharmId})">
+                        <i class="fa-solid fa-trash-can"></i> ${currentLang==='ar'?'حذف المحدد':'Supprimer Sélection'}
+                    </button>
+                    ` : ''}
+                    <div class="search-box" style="margin:0; width:300px; background:#f8fafc;">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-pharm-stock-main" placeholder="${t('search_placeholder')}" value="${pStockState.search || ''}" style="background:transparent; border:none;">
+                    </div>
                 </div>
             </div>
             <div class="table-container shadow-sm" style="border-radius:0; border:none; border-top: 1px solid #f1f5f9;">
                 <table style="width:100%; border-collapse: separate; border-spacing: 0;">
                     <thead>
                         <tr style="background:#f8fafc;">
+                            ${isFullAdmin ? `<th style="padding:15px; text-align:center; width:50px;"><input type="checkbox" onchange="window.toggleAllPharmacyStock(this, ${pharmId})" style="width:18px; height:18px; cursor:pointer;"></th>` : ''}
                             <th style="padding:15px 25px;">Médicament</th>
                             <th style="padding:15px;">Lot</th>
                             <th style="padding:15px;">Expiration</th>
@@ -4011,6 +4020,41 @@ window.deleteSelectedPatients = async function() {
 
 window.toggleAllPharmacyStock = function(source, pharmId) {
     document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}`).forEach(cb => cb.checked = source.checked);
+};
+
+window.toggleAllPharmacyStock = function(master, pharmId) {
+    document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}`).forEach(cb => cb.checked = master.checked);
+};
+
+window.deleteSelectedPharmacyStock = async function(pharmId) {
+    const selected = Array.from(document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}:checked`)).map(cb => cb.value);
+    if (selected.length === 0) {
+        showToast(currentLang === 'ar' ? 'لم يتم تحديد أي دواء' : "Aucun médicament sélectionné", 'error');
+        return;
+    }
+
+    const confirmDelete = await window.showCustomDialog({
+        title: currentLang === 'ar' ? "حذف جماعي" : "Suppression Groupée",
+        msg: currentLang === 'ar' ? `هل أنت متأكد من حذف ${selected.length} دواء من مخزون الصيدلية؟` : `Supprimer ${selected.length} articles de cette pharmacie ?`,
+        type: "confirm",
+        icon: "fa-trash-can"
+    });
+
+    if (!confirmDelete) return;
+
+    try {
+        window.updateSyncStatus('syncing');
+        const { error } = await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).in('medicine_id', selected);
+        if (error) throw error;
+        
+        await window.renderPharmacy(pharmId);
+        window.updateSyncStatus('success');
+        showToast(currentLang === 'ar' ? 'تم الحذف بنجاح' : "Articles supprimés avec succès");
+    } catch(err) {
+        console.error(err);
+        window.updateSyncStatus('error');
+        showToast("Erreur lors de la suppression", "error");
+    }
 };
 
 window.deleteFromPharmacyStock = async function(pharmId, medId) {
