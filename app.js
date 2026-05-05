@@ -489,7 +489,7 @@ async function loadDataFromSupabase() {
         console.log("Fetching configuration from Supabase...");
         
         // Fetch small config tables and global counts
-        const [pharms, counters, returns, totalMeds, totalPats, totalTrans, totalDisps, totalExpired] = await Promise.all([
+        const [pharms, counters, returns, totalMeds, totalPats, totalTrans, totalDisps, totalExpired, totalLow] = await Promise.all([
             _supabase.from('pharmacies').select('*'),
             _supabase.from('app_counters').select('*'),
             _supabase.from('return_requests').select('*').eq('status', 'PENDING').order('id', { ascending: false }).limit(100),
@@ -497,7 +497,8 @@ async function loadDataFromSupabase() {
             _supabase.from('patients').select('id', { count: 'exact', head: true }),
             _supabase.from('transfers').select('id', { count: 'exact', head: true }),
             _supabase.from('dispensations').select('id', { count: 'exact', head: true }),
-            _supabase.from('medicines').select('id', { count: 'exact', head: true }).lt('expiry_date', new Date().toISOString().split('T')[0])
+            _supabase.from('medicines').select('id', { count: 'exact', head: true }).lt('expiry_date', new Date().toISOString().split('T')[0]),
+            _supabase.from('medicines').select('id', { count: 'exact', head: true }).lt('qty', 50)
         ]);
 
         // Update state statistics
@@ -506,7 +507,8 @@ async function loadDataFromSupabase() {
             totalPatients: totalPats.count || 0,
             totalDistributions: totalTrans.count || 0,
             totalDispensations: totalDisps.count || 0,
-            totalExpired: totalExpired.count || 0
+            totalExpired: totalExpired.count || 0,
+            totalLowStock: totalLow.count || 0
         };
 
         // Map Pharmacies
@@ -1459,7 +1461,7 @@ window.renderView = async function(viewName) {
                     <div class="stat-label">Périmés</div>
                 </div>
                 <div class="stat-card sc-orange" onclick="window.renderView('central')">
-                    <div class="stat-val">---</div>
+                    <div class="stat-val">${(state.stats.totalLowStock || 0).toLocaleString()}</div>
                     <div class="stat-label">Stock Faible</div>
                 </div>
                 ${currentUser.role !== 'manager' ? `
