@@ -2883,7 +2883,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }));
 
     // Fetch counts and history
-    const [dispTotal, lowStockTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}] = await Promise.all([
+    const [dispTotal, lowStockTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}] = await Promise.all([
         _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).lt('qty', 50),
         fetchTableData('dispensations', { 
@@ -2892,7 +2892,8 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             filters: { pharmacy_id: pharmId },
             order: { col: 'date', ascending: false }
         }),
-        _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(200)
+        _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(200),
+        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(200)
     ]);
 
     const dashboardHeaderHtml = `
@@ -2974,7 +2975,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     <label style="display:block; margin-bottom:8px; font-weight:800;">1. Choisir le Patient</label>
                     <input type="text" id="disp-patient-${pharmId}" list="patients-list" required placeholder="${t('patient_name')}" autocomplete="off" style="max-width: 400px; border: 2px solid var(--primary-brand);">
                     <datalist id="patients-list">
-                        ${state.patients.map(pat => `<option value="${pat.name} (${pat.nationalId})"></option>`).join('')}
+                        ${(recentPats || []).map(pat => `<option value="${pat.name} (${pat.national_id || '-'})"></option>`).join('')}
                     </datalist>
                 </div>
 
