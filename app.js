@@ -1431,12 +1431,12 @@ window.renderView = async function(viewName) {
             
             <div class="stat-grid-6">
                 <div class="stat-card sc-green" onclick="window.renderView('central')">
-                    <div class="stat-val">${(state.stats.totalMeds || 0).toLocaleString()}</div>
-                    <div class="stat-label">${t('stat_total_meds')} (Unités)</div>
+                    <div class="stat-val">${(state.stats.totalTypes || 0).toLocaleString()}</div>
+                    <div class="stat-label">${t('stat_total_meds')}</div>
                 </div>
                 <div class="stat-card sc-teal" onclick="window.renderView('central')">
-                    <div class="stat-val">${(state.stats.totalTypes || 0).toLocaleString()}</div>
-                    <div class="stat-label">Types de Méd.</div>
+                    <div class="stat-val">${(state.stats.totalMeds || 0).toLocaleString()}</div>
+                    <div class="stat-label">Total Unités (Stock)</div>
                 </div>
                 <div class="stat-card sc-red" onclick="window.renderView('expired')">
                     <div class="stat-val">${(state.stats.totalExpired || 0).toLocaleString()}</div>
