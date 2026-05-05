@@ -638,100 +638,81 @@ window.importPharmacyStock = async function(event, pharmId) {
             const { data: _maxIdRow } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
             let _nextMedicineId = _maxIdRow ? (parseInt(_maxIdRow.id) + 1) : 1000;
 
+            // --- SCALABILITY REFACTOR: Bulk Processing ---
             let successCount = 0, errorCount = 0;
             const failedRows = [];
 
-            for (const row of processedRows) {
-                try {
-                    let medicineId = null;
+            // 1. Prepare unique identifier for each row (Name + Batch)
+            processedRows.forEach(r => r.key = `${r.name.toLowerCase().trim()}|${(r.batch||'').toLowerCase().trim()}`);
 
-                    // ---- Find medicine by EXACT (name + batch) only ----
-                    // Each lot = independent medicine record
-                    const nameLower = row.name.toLowerCase().trim();
-                    const batchLower = row.batch.toLowerCase().trim();
+            // 2. Fetch ALL existing medicines that match names in the file (Bulk Lookup)
+            const uniqueNames = [...new Set(processedRows.map(r => r.name))];
+            const { data: existingMeds } = await _supabase.from('medicines').select('*').in('name', uniqueNames);
+            
+            const medMap = {}; // Key -> ID
+            if (existingMeds) {
+                existingMeds.forEach(m => {
+                    const key = `${m.name.toLowerCase().trim()}|${(m.batch||'').toLowerCase().trim()}`;
+                    medMap[key] = m.id;
+                });
+            }
 
-                    // Step 1: Check local cache (exact name + batch)
-                    const cached = state.medicines.find(m =>
-                        m.name.toLowerCase().trim() === nameLower &&
-                        (m.batch || 'N/A').toLowerCase().trim() === batchLower
-                    );
-                    if (cached) {
-                        medicineId = cached.id;
-                    }
-
-                    // Step 2: Search DB by exact name + batch (case-insensitive)
-                    if (!medicineId) {
-                        const { data: dbFind } = await _supabase.from('medicines')
-                            .select('id')
-                            .ilike('name', row.name)
-                            .ilike('batch', row.batch)
-                            .limit(1)
-                            .maybeSingle();
-                        if (dbFind) medicineId = dbFind.id;
-                    }
-
-                    // Step 3: Not found → create new medicine for this lot
-                    if (!medicineId) {
-                        const thisId = _nextMedicineId++;
-                        const { data: newMed, error: medErr } = await _supabase.from('medicines').insert([{
-                            id: thisId,
-                            name: row.name,
-                            batch: row.batch,
-                            expiry_date: row.expiry,
-                            qty: 0,
-                            entry_date: new Date().toISOString().split('T')[0]
-                        }]).select('id').single();
-
-                        if (medErr) {
-                            // Duplicate constraint — try one more time to find it
-                            const { data: retry } = await _supabase.from('medicines')
-                                .select('id')
-                                .ilike('name', row.name)
-                                .ilike('batch', row.batch)
-                                .limit(1)
-                                .maybeSingle();
-                            if (retry) {
-                                medicineId = retry.id;
-                            } else {
-                                errorCount++;
-                                failedRows.push(row.name + ' [' + row.batch + ']: ' + medErr.message);
-                                console.error('Cannot find or create medicine:', row.name, row.batch, medErr);
-                                continue;
-                            }
-                        } else {
-                            medicineId = newMed.id;
-                            // Add to local cache so next lookup finds it instantly
-                            state.medicines.push({ id: medicineId, name: row.name, batch: row.batch, expiry_date: row.expiry, qty: 0 });
-                        }
-                    }
-
-                    // ---- Insert into pharmacy_stock (table was cleared before import) ----
-                    const { error: psErr } = await _supabase.from('pharmacy_stock').insert({
-                        pharmacy_id: pharmId,
-                        medicine_id: medicineId,
-                        qty: row.qty
+            // 3. Identify missing medicines and prepare bulk insert
+            const missingMeds = [];
+            const seenKeys = new Set();
+            processedRows.forEach(row => {
+                if (!medMap[row.key] && !seenKeys.has(row.key)) {
+                    missingMeds.push({
+                        id: _nextMedicineId++,
+                        name: row.name,
+                        batch: row.batch,
+                        expiry_date: row.expiry,
+                        qty: 0,
+                        entry_date: new Date().toISOString().split('T')[0]
                     });
+                    seenKeys.add(row.key);
+                }
+            });
 
-                    if (psErr) {
-                        // Fallback: try upsert in case of conflict
-                        const { error: upsertErr } = await _supabase.from('pharmacy_stock').upsert({
-                            pharmacy_id: pharmId,
-                            medicine_id: medicineId,
-                            qty: row.qty
-                        }, { onConflict: 'pharmacy_id,medicine_id' });
-                        if (upsertErr) {
-                            errorCount++;
-                            failedRows.push(row.name + ' [' + row.batch + ']: ' + upsertErr.message);
-                            console.error('pharmacy_stock error:', row.name, upsertErr);
-                        } else { successCount++; }
-                    } else {
-                        successCount++;
+            // 4. Bulk Insert missing medicines in chunks of 1000
+            if (missingMeds.length > 0) {
+                for (let i = 0; i < missingMeds.length; i += 1000) {
+                    const chunk = missingMeds.slice(i, i + 1000);
+                    const { data: inserted, error: insErr } = await _supabase.from('medicines').insert(chunk).select('id, name, batch');
+                    if (insErr) {
+                        console.error("Bulk Med Insert Error:", insErr);
+                        // If bulk fails, we might have partial success or conflict
                     }
+                    if (inserted) {
+                        inserted.forEach(m => {
+                            const key = `${m.name.toLowerCase().trim()}|${(m.batch||'').toLowerCase().trim()}`;
+                            medMap[key] = m.id;
+                        });
+                    }
+                }
+            }
 
-                } catch(e) {
-                    errorCount++;
-                    failedRows.push(row.name + ' [' + row.batch + ']: ' + (e.message || e));
-                    console.error('Row error:', row.name, e);
+            // 5. Prepare and Bulk Upsert Pharmacy Stock
+            const stockUpserts = processedRows.map(row => {
+                const medId = medMap[row.key];
+                if (!medId) return null;
+                return {
+                    pharmacy_id: pharmId,
+                    medicine_id: medId,
+                    qty: row.qty
+                };
+            }).filter(u => u !== null);
+
+            if (stockUpserts.length > 0) {
+                for (let i = 0; i < stockUpserts.length; i += 1000) {
+                    const chunk = stockUpserts.slice(i, i + 1000);
+                    const { error: upsertErr } = await _supabase.from('pharmacy_stock').upsert(chunk, { onConflict: 'pharmacy_id,medicine_id' });
+                    if (upsertErr) {
+                        errorCount += chunk.length;
+                        console.error("Bulk Stock Upsert Error:", upsertErr);
+                    } else {
+                        successCount += chunk.length;
+                    }
                 }
             }
 
@@ -969,13 +950,25 @@ async function saveState() {
     // I will refactor mutation functions to call _supabase directly.
 }
 
-window.exportCentralStockToExcel = function() {
-    if(!state.medicines || state.medicines.length === 0) {
-        window.showToast(currentLang === 'ar' ? 'المخزون فارغ. لا يوجد شيء للسحب.' : 'Le stock est vide. Rien à exporter.', 'error');
+window.exportCentralStockToExcel = async function() {
+    window.showToast("Préparation du fichier Excel...", "info");
+    
+    // Scalability: Fetch top 5000 records for export (fetching millions would crash the browser)
+    const { data: meds, error } = await _supabase.from('medicines')
+        .select('*')
+        .order('name', { ascending: true })
+        .limit(5000);
+
+    if(error || !meds || meds.length === 0) {
+        window.showToast(currentLang === 'ar' ? 'المخزون فارغ أو حدث خطأ.' : 'Le stock est vide ou une erreur est survenue.', 'error');
         return;
     }
+
+    if (meds.length === 5000) {
+        window.showToast("Note: Export limité aux 5000 premiers articles pour la performance.", "warning");
+    }
     
-    const dataToExport = state.medicines.map(m => {
+    const dataToExport = meds.map(m => {
         let statusText = currentLang === 'ar' ? 'جيد' : 'Bon';
         if (m.qty === 0) statusText = currentLang === 'ar' ? 'نافذ' : 'Rupture';
         else if (m.qty < 50) statusText = currentLang === 'ar' ? 'ضعيف' : 'Faible';
@@ -986,8 +979,8 @@ window.exportCentralStockToExcel = function() {
             [currentLang === 'ar' ? 'رقم الحصة' : 'Lot']: m.batch || '-',
             [currentLang === 'ar' ? 'الكمية' : 'Quantité']: m.qty,
             [currentLang === 'ar' ? 'سعر الشراء' : 'Prix d\'achat']: m.price || 0,
-            [currentLang === 'ar' ? 'تاريخ الدخول' : 'Date d\'entrée']: m.entryDate || '-',
-            [currentLang === 'ar' ? 'تاريخ الانتهاء' : 'Date d\'expiration']: m.expiry || '-',
+            [currentLang === 'ar' ? 'تاريخ الدخول' : 'Date d\'entrée']: m.entry_date || '-',
+            [currentLang === 'ar' ? 'تاريخ الانتهاء' : 'Date d\'expiration']: m.expiry_date || '-',
             [currentLang === 'ar' ? 'الحالة' : 'Statut']: statusText
         };
     });
@@ -1340,14 +1333,12 @@ window.renderView = async function(viewName) {
     if (viewName === 'dashboard') {
         pageTitle.innerText = t('page_dashboard');
         
-        const totalCentralCount = state.medicines.length; // Nombre total de références
-        const totalItemsSum = state.medicines.reduce((acc, curr) => acc + (parseInt(curr.qty) || 0), 0); // Somme totale des boîtes
-        let totalPStock = 0;
-        for(let p in state.pharmacies) {
-            totalPStock += state.pharmacies[p].stock.reduce((a,c) => a + c.qty, 0);
-        }
-
-        const lowStock = state.medicines.find(m => m.qty < 50);
+        // Scalability: Get counts from state.stats instead of full array
+        const totalCentralCount = state.stats.totalMeds || 0;
+        
+        // Fetch one sample low stock item for the alert bar if not already cached
+        const { data: lowStockItems } = await _supabase.from('medicines').select('name').lt('qty', 50).limit(1);
+        const lowStock = lowStockItems && lowStockItems[0];
         const alertHtml = lowStock ? `
             <div class="alert-bar">
                 <i class="fa-solid fa-triangle-exclamation"></i>
@@ -1644,7 +1635,13 @@ window.renderView = async function(viewName) {
 
     else if (viewName === 'distribution') {
         pageTitle.innerText = t('page_distribution');
-        const activeMeds = state.medicines.filter(m => !isExpired(m.expiry) && m.qty > 0);
+        
+        // Scalability: Fetch a sample of active medicines for the datalist
+        const { data: activeMeds } = await _supabase.from('medicines')
+            .select('name, batch, qty, expiry_date')
+            .gt('qty', 0)
+            .order('name', { ascending: true })
+            .limit(200);
         
         content = `
             ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) ? `
@@ -1759,8 +1756,27 @@ window.renderView = async function(viewName) {
             const batch = [];
             let valid = true;
             
+            // Scalability Fix: Fetch only required medicines from Supabase (since state.medicines is now empty)
+            const medNamesRequested = Array.from(rows).map(r => {
+                const val = r.querySelector('.row-med-search').value;
+                return val.includes(' (Lot: ') ? val.split(' (Lot: ')[0] : val;
+            }).filter(n => n);
+
+            if (medNamesRequested.length === 0) return;
+
+            const { data: dbStock, error: dbErr } = await _supabase.from('medicines')
+                .select('*')
+                .in('name', medNamesRequested)
+                .gt('qty', 0);
+
+            if (dbErr) {
+                console.error("Error fetching stock:", dbErr);
+                window.showToast("Erreur lors de la vérification du stock", "error");
+                return;
+            }
+
             // Create a local copy of stock to track allocations within this session
-            const localStock = state.medicines.map(m => ({ ...m }));
+            const localStock = dbStock.map(m => ({ ...m, expiry: m.expiry_date }));
             
             for (const row of rows) {
                 const searchValue = row.querySelector('.row-med-search').value;
@@ -1854,20 +1870,28 @@ window.renderView = async function(viewName) {
             try {
                 window.showToast("Traitement de l'envoi...", "info");
                 
+                // Fetch current pharmacy stock for these medicines to calculate new totals correctly
+                const medIds = batch.map(b => b.medId);
+                const { data: pStockData } = await _supabase.from('pharmacy_stock')
+                    .select('*')
+                    .eq('pharmacy_id', pharmId)
+                    .in('medicine_id', medIds);
+                
+                const pStockMap = {};
+                if (pStockData) pStockData.forEach(ps => pStockMap[ps.medicine_id] = ps.qty);
+
                 // Optimized Parallel Execution
                 const medicineUpdates = batch.map(item => {
-                    const med = state.medicines.find(m => m.id === item.medId);
+                    const med = dbStock.find(m => m.id === item.medId);
                     return _supabase.from('medicines').update({ qty: med.qty - item.qty }).eq('id', item.medId);
                 });
 
                 const pharmacyStockUpserts = batch.map(item => {
-                    const p = state.pharmacies[pharmId];
-                    const pMed = p.stock.find(m => m.id === item.medId);
-                    const newPQty = (pMed ? pMed.qty : 0) + item.qty;
+                    const currentQty = pStockMap[item.medId] || 0;
                     return {
                         pharmacy_id: pharmId,
                         medicine_id: item.medId,
-                        qty: newPQty
+                        qty: currentQty + item.qty
                     };
                 });
 
