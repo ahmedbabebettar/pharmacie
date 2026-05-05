@@ -577,7 +577,10 @@ async function loadDataFromSupabase() {
         })) : [];
 
         // Fetch pending orders
-        const { data: pendingOrds // PATCH MARKER START - BULLETPROOF importPharmacyStock
+        const { data: pendingOrds } = await _supabase.from('orders').select('*');
+        state.orders = pendingOrds || [];
+
+// PATCH MARKER START - BULLETPROOF importPharmacyStock
 window.importPharmacyStock = async function(event, pharmId) {
     const file = event.target.files[0];
     if(!file) return;
