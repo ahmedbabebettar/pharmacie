@@ -2903,7 +2903,6 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     pageTitle.innerText = p.name.fr;
     
     const isFullAdmin = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
-    const isAdmin = isFullAdmin; // For compatibility with existing isAdmin checks in this function
     
     let notificationsHtml = '';
     const myReceipts = (state.receipts || []).filter(r => (r.pharmacy_id || r.pharmacyId) == pharmId).slice().reverse();
@@ -2934,35 +2933,47 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         `;
     }
 
-    // Fetch Paginated Pharmacy Stock (isolated per pharmacy)
+    // --- DATA FETCHING (Optimized for 63 articles) ---
     const pStateKey = `pharmacy_${pharmId}`;
     if (!pagination[pStateKey]) {
         pagination[pStateKey] = { currentPage: 1, pageSize: 25, total: 0, search: '' };
     }
     const pStockState = pagination[pStateKey];
 
-    // SCALABILITY: Use left join (default) instead of !inner to avoid rows disappearing if medicine join is slow/missing
-    const { data: stockData, total: stockTotal } = await fetchTableData('pharmacy_stock', {
-        page: pStockState.currentPage,
-        pageSize: pStockState.pageSize,
-        filters: { pharmacy_id: parseInt(pharmId) },
-        search: pStockState.search,
-        select: '*, medicines(name, batch, expiry_date)'
-    });
-    pStockState.total = stockTotal;
+    // 1. Fetch ALL stock for this pharmacy to allow local fast filtering
+    const { data: allStockData, error: stockErr } = await _supabase.from('pharmacy_stock')
+        .select('*, medicines(id, name, batch, expiry_date)')
+        .eq('pharmacy_id', pharmId);
     
-    // Map stock for rendering
-    const currentStock = stockData.map(s => ({
-        id: s.medicine_id,
-        name: s.medicines?.name || 'Inconnu',
-        batch: s.medicines?.batch || '-',
-        qty: s.qty,
-        expiry: s.medicines?.expiry_date || '-'
+    if (stockErr) throw stockErr;
+
+    // 2. Filter out orphans and apply search locally
+    let filteredStock = (allStockData || []).filter(ps => ps.medicines != null);
+    
+    const searchLow = (pStockState.search || '').toLowerCase().trim();
+    if (searchLow) {
+        filteredStock = filteredStock.filter(ps => 
+            ps.medicines.name.toLowerCase().includes(searchLow) || 
+            (ps.medicines.batch && ps.medicines.batch.toLowerCase().includes(searchLow))
+        );
+    }
+
+    // 3. Apply local pagination
+    pStockState.total = filteredStock.length;
+    const from = (pStockState.currentPage - 1) * pStockState.pageSize;
+    const to = from + pStockState.pageSize;
+    const currentStockPage = filteredStock.slice(from, to).map(ps => ({
+        id: ps.medicines.id,
+        ps_id: ps.id, // Primary key in pharmacy_stock
+        name: ps.medicines.name,
+        batch: ps.medicines.batch,
+        expiry: ps.medicines.expiry_date,
+        qty: ps.qty
     }));
 
-    // Fetch counts and history (ensuring numeric ID for all queries)
+    // 4. Fetch Meta & History in Parallel
     const numericId = parseInt(pharmId);
-    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}, {data: searchableStockData}] = await Promise.all([
+    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}] = await Promise.all([
         _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).lt('qty', 50),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).filter('medicine_id', 'in', 
@@ -2974,19 +2985,20 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             filters: { pharmacy_id: numericId },
             order: { col: 'date', ascending: false }
         }),
-        _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(1000),
-        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(100),
-        _supabase.from('pharmacy_stock').select('qty, medicines(id, name, batch, expiry_date)').eq('pharmacy_id', numericId).gt('qty', 0).limit(2000)
+        _supabase.from('medicines').select('id, name, batch, expiry_date').order('name', { ascending: true }).limit(1000),
+        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(100)
     ]);
 
-    const searchableStock = (searchableStockData || []).map(s => ({
-        id: s.medicines?.id,
-        name: s.medicines?.name || 'Inconnu',
-        batch: s.medicines?.batch || '-',
-        qty: s.qty,
-        expiry: s.medicines?.expiry_date || '-'
+    // Data for Dispense Datalist (Only valid medicines in stock)
+    const searchableStock = (allStockData || []).filter(ps => ps.medicines != null && ps.qty > 0).map(ps => ({
+        id: ps.medicines.id,
+        name: ps.medicines.name,
+        batch: ps.medicines.batch,
+        qty: ps.qty,
+        expiry: ps.medicines.expiry_date
     }));
 
+    // --- HTML BUILDING ---
     const dashboardHeaderHtml = `
         <div class="page-header" style="justify-content: flex-end; gap: 10px;">
             ${isFullAdmin ? `
@@ -3004,13 +3016,12 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             </button>
             ` : ''}
         </div>
-        <!-- Pharmacy Stat Cards -->
         <div class="stat-grid-6" style="margin-bottom: 24px;">
             <div class="stat-card sc-green" onclick="window.renderPharmacy(${pharmId}, 'all')">
-                <div class="stat-val">${stockTotal}</div>
+                <div class="stat-val">${pStockState.total}</div>
                 <div class="stat-label">Stock Actuel</div>
             </div>
-            <div class="stat-card sc-purple" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')">
+            <div class="stat-card sc-purple" onclick="window.renderPharmacy(${pharmId}, 'history')">
                 <div class="stat-val">${dispTotal.count || 0}</div>
                 <div class="stat-label">Délivrances</div>
             </div>
@@ -3021,163 +3032,6 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             <div class="stat-card sc-red">
                 <div class="stat-val">${expiredTotal.count || 0}</div>
                 <div class="stat-label">Périmés</div>
-            </div>
-        </div>
-    `;
-
-    const orderHtml = `
-        <div class="transfer-card" style="margin-top: 30px; border-left: 5px solid var(--info-blue);">
-            <div class="block-title" style="color: var(--info-blue);"><i class="fa-solid fa-cart-shopping" style="margin: 0 8px;"></i> Demande d'Approvisionnement (Bon de Commande)</div>
-            <p style="font-size: 13px; color: #7f8c8d; margin-bottom: 15px;">Sélectionnez les médicaments dont vous avez besoin du Stock Central.</p>
-            <form id="order-form-${pharmId}">
-                <div class="table-container" style="margin-bottom: 20px; border: 1px solid #e5e7eb;">
-                    <table style="width:100%;">
-                        <thead>
-                            <tr style="background:#f9fafb;">
-                                <th style="width:60%;">${t('th_med')}</th>
-                                <th style="width:25%;">${t('th_qty')}</th>
-                                <th style="width:15%;"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="order-tbody-${pharmId}">
-                            <!-- Dynamic rows -->
-                        </tbody>
-                    </table>
-                </div>
-                <datalist id="central-meds-list-${pharmId}">
-                    ${recentMeds.map(m => `<option value="${m.name}"></option>`).join('')}
-                </datalist>
-
-                <div style="display:flex; justify-content: space-between; align-items: center;">
-                    <button type="button" class="primary-btn" style="background:var(--primary-brand);" onclick="window.addOrderRow(${pharmId})">
-                        <i class="fa-solid fa-plus-circle"></i> Ajouter un médicament
-                    </button>
-                    <button type="submit" class="primary-btn" style="background:var(--info-blue); padding: 12px 32px; font-size: 1rem;">
-                        <i class="fa-solid fa-paper-plane"></i> Envoyer la demande
-                    </button>
-                </div>
-            </form>
-        </div>
-    `;
-
-    const dispenseHtml = `
-        <div class="transfer-card">
-            <div class="block-title"><i class="fa-solid fa-hand-holding-medical" style="margin: 0 8px;"></i> Délivrance de médicaments (Multiples)</div>
-            <form id="bulk-dispense-form-${pharmId}">
-                <div class="form-group" style="margin-bottom: 20px;">
-                    <label style="display:block; margin-bottom:8px; font-weight:800;">1. Choisir le Patient</label>
-                    <input type="text" id="disp-patient-${pharmId}" list="patients-list" required placeholder="${t('patient_name')}" autocomplete="off" style="max-width: 400px; border: 2px solid var(--primary-brand);">
-                    <datalist id="patients-list">
-                        ${(recentPats || []).map(pat => `<option value="${pat.name} (${pat.national_id || '-'})"></option>`).join('')}
-                    </datalist>
-                </div>
-
-                <label style="display:block; margin-bottom:12px; font-weight:800;">2. Liste des Médicaments à Délivrer</label>
-                <div class="table-container" style="margin-bottom: 20px; border: 1px solid #e5e7eb;">
-                    <table style="width:100%;">
-                        <thead>
-                            <tr style="background:#f9fafb;">
-                                <th style="width:60%;">${t('th_med')}</th>
-                                <th style="width:25%;">${t('th_qty')}</th>
-                                <th style="width:15%;"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="bulk-disp-tbody-${pharmId}">
-                            <!-- Dynamic rows here -->
-                        </tbody>
-                    </table>
-                </div>
-                <datalist id="disp-meds-list-${pharmId}">
-                    ${searchableStock.filter(m => !isExpired(m.expiry)).map(m => `<option value="${m.name} [${m.batch}] (Stock: ${m.qty})" data-id="${m.id}"></option>`).join('')}
-                </datalist>
-
-                <div style="display:flex; justify-content: space-between; align-items: center;">
-                    <button type="button" class="primary-btn" style="background:var(--primary-brand);" onclick="window.addDispRow(${pharmId})">
-                        <i class="fa-solid fa-plus-circle"></i> Ajouter un autre médicament
-                    </button>
-                    <div style="display:flex; gap: 10px;">
-                        ${isAdmin ? `
-                        <button type="button" class="primary-btn" style="background:var(--danger-red); font-size: 1rem; padding: 12px 20px;" onclick="window.triggerExceptionalDispense(${pharmId})">
-                            <i class="fa-solid fa-triangle-exclamation"></i> صرف استثنائي (مدير)
-                        </button>
-                        ` : ''}
-                        <button type="submit" class="primary-btn" style="background:var(--accent-green); padding: 12px 32px; font-size: 1rem;">
-                            <i class="fa-solid fa-check-double"></i> Confirmer la Délivrance
-                        </button>
-                    </div>
-                </div>
-            </form>
-        </div>
-    `;
-
-    const stockHistoryHtml = `
-        <div class="dash-row" style="margin-top:20px;">
-            <div class="dash-col shadow-sm">
-                <div class="block-title" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>${t('stock_available')}</span>
-                    <div class="search-box" style="margin:0; width:200px;">
-                        <i class="fa-solid fa-search"></i>
-                        <input type="text" id="search-pharm-stock-${pharmId}" placeholder="Filtrer..." value="${pStockState.search || ''}" style="padding:4px 8px 4px 30px; font-size:12px;">
-                    </div>
-                </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                ${isFullAdmin ? `<th><input type="checkbox" onchange="window.toggleAllPharmacyStock(this, ${pharmId})"></th>` : ''}
-                                <th>${t('th_med')}</th>
-                                <th>${t('th_batch')}</th>
-                                <th>${t('th_expiry')}</th>
-                                <th style="text-align:center;">${t('th_qty')}</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${currentStock.map(m => `
-                                <tr>
-                                    ${isFullAdmin ? `<td><input type="checkbox" class="pharm-stock-checkbox-${pharmId}" value="${m.id}"></td>` : ''}
-                                    <td><strong>${m.name}</strong></td>
-                                    <td><small>${m.batch || '-'}</small></td>
-                                    <td><small>${formatDate(m.expiry) || '-'}</small></td>
-                                    <td style="text-align:center;"><span class="status-badge ${m.qty > 0 ? 'good' : 'bad'}">${m.qty}</span></td>
-                                    <td style="text-align:left; display:flex; gap:5px;">
-                                        <button class="icon-btn edit-btn" title="${t('btn_return')}" onclick="window.returnToCentral(${pharmId}, ${m.id})">
-                                            <i class="fa-solid fa-rotate-left"></i>
-                                        </button>
-                                        ${isFullAdmin ? `
-                                        <button class="icon-btn delete-btn" title="Supprimer du stock صيدلية" onclick="window.deleteFromPharmacyStock(${pharmId}, ${m.id})">
-                                            <i class="fa-solid fa-trash"></i>
-                                        </button>
-                                        ` : ''}
-                                    </td>
-                                </tr>`).join('')}
-                        </tbody>
-                    </table>
-                </div>
-                ${renderPaginationControls(pStateKey)}
-            </div>
-            <div class="dash-col shadow-sm" style="flex: 2;">
-                <div class="block-title">${t('history_dispense')}</div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr><th>Réf.</th><th>${t('th_date')}</th><th>${t('th_patient')}</th><th>${t('th_med')}</th><th>${t('th_qty')}</th><th>${t('th_worker')}</th></tr>
-                        </thead>
-                        <tbody>
-                            ${dispHistory.map(d => `
-                                <tr>
-                                    <td><small><strong>${d.reference || '-'}</strong></small></td>
-                                    <td>${formatDate(d.date)}</td>
-                                    <td>${d.patient_name || '-'}</td>
-                                    <td><strong>${d.medicine_name}</strong></td>
-                                    <td><span class="status-badge warning">-${d.qty}</span></td>
-                                    <td>${window.parseWorkerName(d.dispensed_by, currentLang)}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-                ${renderPaginationControls('dispensations', historyTotal)}
             </div>
         </div>
     `;
@@ -3202,100 +3056,109 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         </div>
     `;
 
-    // --- PREMIUM MODERN STOCK VIEW ---
-    const sRows = currentStock.map(m => {
-        const isExp = isExpired(m.expiry);
-        const isLow = m.qty < 50;
-        return `
-            <tr class="${isExp ? 'expired-row' : ''}">
-                ${isFullAdmin ? `<td style="padding: 16px; text-align:center;"><input type="checkbox" class="pharm-stock-checkbox-${pharmId}" value="${m.id}" style="width:18px; height:18px; cursor:pointer;"></td>` : ''}
-                <td style="padding: 16px;">
-                    <div style="font-weight:700; color:var(--primary-brand); font-size:1.05rem;">${m.name}</div>
-                    <div style="font-size:0.8rem; color:#64748b; margin-top:2px;">Réf: ${m.id}</div>
-                </td>
-                <td><span class="badge-soft" style="background:#f1f5f9; color:#475569; padding:4px 10px; border-radius:6px; font-weight:600;">${m.batch}</span></td>
-                <td style="${isExp ? 'color:var(--danger-red); font-weight:700;' : ''}">${formatDate(m.expiry)}</td>
-                <td>
-                    <span class="status-badge ${isLow ? 'warning' : 'good'}" style="font-size:1rem; padding:6px 16px; min-width:60px; text-align:center;">
-                        ${m.qty}
-                    </span>
-                </td>
-                <td style="text-align:right; padding:16px;">
-                    <div style="display:flex; gap:8px; justify-content:flex-end;">
-                        <button class="icon-btn edit-btn" title="Délivrer" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')" style="background:var(--primary-brand); color:white; width:36px; height:36px;">
-                            <i class="fa-solid fa-hand-holding-medical"></i>
-                        </button>
-                        <button class="icon-btn" title="${t('btn_return')}" onclick="window.returnToCentral(${pharmId}, ${m.id})" style="background:#f1f5f9; color:#64748b; width:36px; height:36px;">
-                            <i class="fa-solid fa-rotate-left"></i>
-                        </button>
-                        ${isFullAdmin ? `
-                        <button class="icon-btn delete-btn" title="Supprimer" onclick="window.deleteFromPharmacyStock(${pharmId}, ${m.id})" style="width:36px; height:36px;">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
-                        ` : ''}
-                    </div>
-                </td>
-            </tr>
-        `;
-    }).join('');
-
+    // --- MAIN VIEWS ---
     const modernStockHtml = `
-        <div class="transfer-card animated fadeIn" style="border-top: 5px solid var(--accent-green); box-shadow: var(--shadow-lg);">
+        <div class="transfer-card animated fadeIn" style="border-top: 5px solid var(--accent-green);">
             <div class="block-title" style="color:var(--accent-green); display:flex; justify-content:space-between; align-items:center; padding: 20px 25px;">
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <div style="width:40px; height:40px; background:rgba(16, 185, 129, 0.1); border-radius:10px; display:flex; align-items:center; justify-content:center;">
-                        <i class="fa-solid fa-boxes-stacked" style="font-size:1.2rem;"></i>
-                    </div>
-                    <div>
-                        <div style="font-size:1.2rem; font-weight:800;">${currentLang==='ar'?'المخزون الحالي':'Stock de la Pharmacie'}</div>
-                        <div style="font-size:0.85rem; color:#94a3b8; font-weight:400;">${stockTotal} ${currentLang==='ar'?'دواء مسجل':'articles enregistrés'}</div>
-                    </div>
+                <div>
+                    <div style="font-size:1.2rem; font-weight:800;">Stock de la Pharmacie</div>
+                    <div style="font-size:0.85rem; color:#94a3b8;">${pStockState.total} articles affichés</div>
                 </div>
-                <div style="display:flex; gap:15px; align-items:center;">
-                    ${isFullAdmin ? `
-                    <button class="primary-btn" style="background:var(--danger-red); font-size:0.85rem; padding:8px 15px;" onclick="window.deleteSelectedPharmacyStock(${pharmId})">
-                        <i class="fa-solid fa-trash-can"></i> ${currentLang==='ar'?'حذف المحدد':'Supprimer Sélection'}
-                    </button>
-                    ` : ''}
-                    <div class="search-box" style="margin:0; width:300px; background:#f8fafc;">
-                        <i class="fa-solid fa-search"></i>
-                        <input type="text" id="search-pharm-stock-main" placeholder="${t('search_placeholder')}" value="${pStockState.search || ''}" style="background:transparent; border:none;">
-                    </div>
+                <div class="search-box" style="margin:0; width:300px; background:#f8fafc;">
+                    <i class="fa-solid fa-search"></i>
+                    <input type="text" id="search-pharm-stock-main" placeholder="Rechercher..." value="${pStockState.search || ''}">
                 </div>
             </div>
-            <div class="table-container shadow-sm" style="border-radius:0; border:none; border-top: 1px solid #f1f5f9;">
-                <table style="width:100%; border-collapse: separate; border-spacing: 0;">
+            <div class="table-container shadow-sm">
+                <table>
                     <thead>
                         <tr style="background:#f8fafc;">
-                            ${isFullAdmin ? `<th style="padding:15px; text-align:center; width:50px;"><input type="checkbox" onchange="window.toggleAllPharmacyStock(this, ${pharmId})" style="width:18px; height:18px; cursor:pointer;"></th>` : ''}
-                            <th style="padding:15px 25px;">Médicament</th>
-                            <th style="padding:15px;">Lot</th>
-                            <th style="padding:15px;">Expiration</th>
-                            <th style="padding:15px;">Quantité</th>
-                            <th style="text-align:right; padding:15px 25px;">Actions</th>
+                            ${isFullAdmin ? `<th style="width:50px; text-align:center;"><input type="checkbox" onchange="window.toggleAllPharmacyStock(this, ${pharmId})"></th>` : ''}
+                            <th>Médicament</th>
+                            <th>Lot</th>
+                            <th>Expiration</th>
+                            <th>Quantité</th>
+                            <th style="text-align:right;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${sRows || `<tr><td colspan="5" style="text-align:center; padding:80px; color:#94a3b8;"><i class="fa-solid fa-box-open" style="font-size:3rem; display:block; margin-bottom:15px; opacity:0.3;"></i> Aucun médicament trouvé dans cette pharmacie.</td></tr>`}
+                        ${currentStockPage.map(m => `
+                            <tr class="${isExpired(m.expiry) ? 'expired-row' : ''}">
+                                ${isFullAdmin ? `<td style="text-align:center;"><input type="checkbox" class="pharm-stock-checkbox-${pharmId}" value="${m.id}"></td>` : ''}
+                                <td><strong>${m.name}</strong></td>
+                                <td><span class="badge-soft">${m.batch || '-'}</span></td>
+                                <td style="${isExpired(m.expiry) ? 'color:red; font-weight:700;' : ''}">${formatDate(m.expiry)}</td>
+                                <td><span class="status-badge ${m.qty < 50 ? 'warning' : 'good'}">${m.qty}</span></td>
+                                <td style="text-align:right; display:flex; gap:8px; justify-content:flex-end;">
+                                    <button class="icon-btn edit-btn" title="Délivrer" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')"><i class="fa-solid fa-hand-holding-medical"></i></button>
+                                    <button class="icon-btn" title="Retour au Central" onclick="window.returnToCentral(${pharmId}, ${m.id})"><i class="fa-solid fa-rotate-left"></i></button>
+                                    ${isFullAdmin ? `<button class="icon-btn delete-btn" onclick="window.deleteFromPharmacyStock(${pharmId}, ${m.id})"><i class="fa-solid fa-trash"></i></button>` : ''}
+                                </td>
+                            </tr>
+                        `).join('') || `<tr><td colspan="6" style="text-align:center; padding:50px;">Aucun médicament trouvé.</td></tr>`}
                     </tbody>
                 </table>
             </div>
-            <div style="padding:15px 25px; border-top: 1px solid #f1f5f9; background:#f8fafc; border-radius:0 0 12px 12px;">
+            <div style="padding:15px 25px; background:#f8fafc; border-top:1px solid #f1f5f9;">
                 ${renderPaginationControls(pStateKey)}
             </div>
         </div>
     `;
 
+    const dispenseHtml = `
+        <div class="transfer-card">
+            <div class="block-title"><i class="fa-solid fa-hand-holding-medical"></i> Délivrance de médicaments</div>
+            <form id="bulk-dispense-form-${pharmId}">
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="font-weight:800;">1. Patient</label>
+                    <input type="text" id="disp-patient-${pharmId}" list="patients-list" required placeholder="Nom du patient..." autocomplete="off" style="max-width: 400px; border: 2px solid var(--primary-brand);">
+                    <datalist id="patients-list">${(recentPats || []).map(pat => `<option value="${pat.name} (${pat.national_id || '-'})"></option>`).join('')}</datalist>
+                </div>
+                <div class="table-container" style="border: 1px solid #e5e7eb; margin-bottom:20px;">
+                    <table style="width:100%;">
+                        <thead><tr><th>Médicament</th><th>Quantité</th><th></th></tr></thead>
+                        <tbody id="bulk-disp-tbody-${pharmId}"><!-- Rows injected here --></tbody>
+                    </table>
+                </div>
+                <datalist id="disp-meds-list-${pharmId}">
+                    ${searchableStock.filter(m => !isExpired(m.expiry)).map(m => `<option value="${m.name} [${m.batch}] (Stock: ${m.qty})" data-id="${m.id}"></option>`).join('')}
+                </datalist>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <button type="button" class="primary-btn" onclick="window.addDispRow(${pharmId})"><i class="fa-solid fa-plus-circle"></i> Ajouter</button>
+                    <button type="submit" class="primary-btn" style="background:var(--accent-green); padding:12px 32px;"><i class="fa-solid fa-check-double"></i> Confirmer la Délivrance</button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    const orderHtml = `
+        <div class="transfer-card" style="border-left: 5px solid var(--info-blue);">
+            <div class="block-title" style="color:var(--info-blue);"><i class="fa-solid fa-cart-shopping"></i> Demande d'Approvisionnement</div>
+            <form id="order-form-${pharmId}">
+                <div class="table-container" style="margin-bottom:20px;">
+                    <table style="width:100%;">
+                        <thead><tr><th>Médicament</th><th>Quantité</th><th></th></tr></thead>
+                        <tbody id="order-tbody-${pharmId}"><!-- Rows --></tbody>
+                    </table>
+                </div>
+                <datalist id="central-meds-list-${pharmId}">${(recentMeds || []).map(m => `<option value="${m.name}"></option>`).join('')}</datalist>
+                <div style="display:flex; justify-content:space-between;">
+                    <button type="button" class="primary-btn" onclick="window.addOrderRow(${pharmId})"><i class="fa-solid fa-plus-circle"></i> Ajouter</button>
+                    <button type="submit" class="primary-btn" style="background:var(--info-blue);"><i class="fa-solid fa-paper-plane"></i> Envoyer</button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    // --- FINAL BODY ---
     let finalBody = '';
     if (subView === 'history') {
         finalBody = `
-            <div class="transfer-card animated fadeIn" style="border-top: 5px solid var(--primary-brand);">
-                <div class="block-title" style="color:var(--primary-brand);"><i class="fa-solid fa-clock-rotate-left"></i> Historique Global des Délivrances</div>
+            <div class="transfer-card">
+                <div class="block-title"><i class="fa-solid fa-clock-rotate-left"></i> Historique des Délivrances</div>
                 <div class="table-container shadow-sm">
                     <table>
-                        <thead>
-                            <tr><th>Réf.</th><th>Date</th><th>Patient</th><th>Médicament</th><th>Quant.</th><th>Responsable</th></tr>
-                        </thead>
+                        <thead><tr><th>Réf.</th><th>Date</th><th>Patient</th><th>Médicament</th><th>Qté</th><th>Staff</th></tr></thead>
                         <tbody>
                             ${dispHistory.map(d => `
                                 <tr>
@@ -3316,7 +3179,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     } else if (subView === 'pharm-dispense') {
         finalBody = dispenseHtml;
     } else if (subView === 'pharm-inbox') {
-        finalBody = notificationsHtml || `<div style="padding:40px; text-align:center; color:#7f8c8d; background:#fff; border-radius:10px; margin-top:20px;">Aucune décharge reçue pour le moment.</div>`;
+        finalBody = notificationsHtml || `<div style="padding:40px; text-align:center; color:#94a3b8;">Boîte de réception vide.</div>`;
     } else if (subView === 'pharm-order') {
         finalBody = orderHtml;
     } else {
@@ -3325,60 +3188,43 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
     viewContainer.innerHTML = dashboardHeaderHtml + tabsHtml + finalBody;
 
-    // Dynamic Patient Search (Infinite Scalability)
-    const patSearchInput = document.getElementById(`disp-patient-${pharmId}`);
-    if (patSearchInput) {
-        patSearchInput.addEventListener('input', window.debounce(async (e) => {
-            const val = e.target.value.trim();
-            if (val.length < 3) return; // Wait for 3 characters
-            
-            const { data } = await _supabase.from('patients')
-                .select('name, national_id')
-                .or(`name.ilike.%${val}%,national_id.ilike.%${val}%`)
-                .limit(15);
-            
-            if (data) {
-                const list = document.getElementById('patients-list');
-                list.innerHTML = data.map(p => `<option value="${p.name} (${p.national_id || '-'})"></option>`).join('');
-            }
+    // --- LISTENERS ---
+    const searchInput = document.getElementById('search-pharm-stock-main');
+    if (searchInput) {
+        searchInput.focus();
+        // Keep cursor at end
+        const val = searchInput.value; searchInput.value = ''; searchInput.value = val;
+        searchInput.addEventListener('input', window.debounce((e) => {
+            pStockState.search = e.target.value;
+            pStockState.currentPage = 1;
+            window.renderPharmacy(pharmId, subView);
         }, 300));
     }
 
-    // Handle Stock Search (Isolated and Main)
-    const stockSearchMain = document.getElementById('search-pharm-stock-main');
-    if(stockSearchMain) {
-        stockSearchMain.addEventListener('input', (e) => {
-            pStockState.search = e.target.value;
-            pStockState.currentPage = 1;
-            debounceSearch(() => window.renderPharmacy(pharmId, subView), 500);
-        });
+    // Patient Search Autocomplete
+    const patInput = document.getElementById(`disp-patient-${pharmId}`);
+    if (patInput) {
+        patInput.addEventListener('input', window.debounce(async (e) => {
+            const val = e.target.value.trim();
+            if (val.length < 2) return;
+            const { data } = await _supabase.from('patients').select('name, national_id').or(`name.ilike.%${val}%,national_id.ilike.%${val}%`).limit(10);
+            if (data) document.getElementById('patients-list').innerHTML = data.map(p => `<option value="${p.name} (${p.national_id || '-'})"></option>`).join('');
+        }, 300));
     }
 
-    const stockSearchInline = document.getElementById(`search-pharm-stock-${pharmId}`);
-    if(stockSearchInline) {
-        stockSearchInline.addEventListener('input', (e) => {
-            pStockState.search = e.target.value;
-            pStockState.currentPage = 1;
-            debounceSearch(() => window.renderPharmacy(pharmId, subView), 500);
-        });
-    }
-
-    // Helper: Add Row
+    // Helper: Add Dispense Row
     window.addDispRow = function(id) {
         const tbody = document.getElementById(`bulk-disp-tbody-${id}`);
+        if (!tbody) return;
         const row = document.createElement('tr');
         row.className = 'bulk-disp-row';
         row.innerHTML = `
             <td>
-                <input type="text" class="row-med-disp-search" list="disp-meds-list-${pharmId}" required style="width:100%; border:1px solid #d1d5db; border-radius:6px; padding:10px;" placeholder="Rechercher médicament...">
+                <input type="text" class="row-med-disp-search" list="disp-meds-list-${pharmId}" required style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px;" placeholder="Médicament...">
                 <input type="hidden" class="row-med">
             </td>
-            <td>
-                <input type="number" class="row-qty" min="1" required placeholder="Qté" style="width:100%;">
-            </td>
-            <td style="text-align:center;">
-                <button type="button" class="icon-btn delete-btn" onclick="window.removeDispRow(this)"><i class="fa-solid fa-xmark"></i></button>
-            </td>
+            <td><input type="number" class="row-qty" min="1" required placeholder="Qté" style="width:100%;"></td>
+            <td style="text-align:center;"><button type="button" class="icon-btn delete-btn" onclick="this.closest('tr').remove()"><i class="fa-solid fa-xmark"></i></button></td>
         `;
         tbody.appendChild(row);
         
@@ -3389,15 +3235,8 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         });
     };
 
-    window.removeDispRow = function(btn) {
-        const row = btn.closest('tr');
-        if (document.querySelectorAll('.bulk-disp-row').length > 1) {
-            row.remove();
-        }
-    };
-
-    const dispBody = document.getElementById(`bulk-disp-tbody-${pharmId}`);
-    if (dispBody) window.addDispRow(pharmId); // Initial row
+    // Auto-add first row if in dispense view
+    if (subView === 'pharm-dispense') window.addDispRow(pharmId);
 
     const dispForm = document.getElementById(`bulk-dispense-form-${pharmId}`);
     if(dispForm) {
