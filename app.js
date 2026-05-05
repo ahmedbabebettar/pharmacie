@@ -1429,6 +1429,13 @@ window.renderView = async function(viewName) {
             ${ordersHtml}
             ${approvalsHtml}
             
+            ${currentUser.role === 'admin' ? `
+            <div style="margin-bottom: 20px; text-align: center;">
+                <button class="primary-btn" style="background: #6366f1; font-size: 13px;" onclick="window.consolidateStock()">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Consolider le Stock (Supprimer les Doublons)
+                </button>
+            </div>
+            ` : ''}
             <div class="stat-grid-6">
                 <div class="stat-card sc-green" onclick="window.renderView('central')">
                     <div class="stat-val">${(state.stats.totalTypes || 0).toLocaleString()}</div>
@@ -4736,3 +4743,52 @@ setInterval(async () => {
 }, 30000); // Every 30 seconds
 
 
+window.consolidateStock = async function() {
+    const confirm = await window.showCustomDialog({
+        title: currentLang === 'ar' ? "دمج الأدوية المكررة" : "Consolider les Doublons",
+        msg: currentLang === 'ar' ? "سيتم دمج الأدوية التي لها نفس الاسم والتشغيلة وجمع كمياتها. هل تريد الاستمرار؟" : "Tous los médicaments avec le même Nom et Lot seront fusionnés. Continuer ?",
+        type: 'confirm',
+        icon: 'fa-wand-magic-sparkles'
+    });
+    
+    if(confirm) {
+        window.showToast("Consolidation en cours...", "info");
+        try {
+            const { data: allMeds } = await _supabase.from('medicines').select('*');
+            if(!allMeds) return;
+
+            const map = {};
+            const toDelete = [];
+            const toUpdate = [];
+
+            allMeds.forEach(m => {
+                const key = `${String(m.name).toLowerCase().trim()}|${String(m.batch).toLowerCase().trim()}`;
+                if(!map[key]) {
+                    map[key] = { ...m };
+                } else {
+                    map[key].qty += (m.qty || 0);
+                    toDelete.push(m.id);
+                    if(!toUpdate.find(u => u.id === map[key].id)) {
+                        toUpdate.push(map[key]);
+                    }
+                }
+            });
+
+            if(toUpdate.length > 0) {
+                for(const m of toUpdate) {
+                    await _supabase.from('medicines').update({ qty: m.qty }).eq('id', m.id);
+                }
+            }
+            if(toDelete.length > 0) {
+                await _supabase.from('medicines').delete().in('id', toDelete);
+            }
+
+            await loadDataFromSupabase();
+            window.showToast("Stock consolidé avec succès !");
+            window.renderView('dashboard');
+        } catch(err) {
+            console.error(err);
+            window.showToast("Erreur lors de la consolidation", "error");
+        }
+    }
+};
