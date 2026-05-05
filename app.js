@@ -1438,20 +1438,11 @@ window.renderView = async function(viewName) {
             ${approvalsHtml}
             
             ${currentUser.role === 'admin' ? `
-            <div style="margin-bottom: 20px; text-align: center;">
-                <button class="primary-btn" style="background: #6366f1; font-size: 13px;" onclick="window.consolidateStock()">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i> Consolider le Stock (Supprimer les Doublons)
-                </button>
-            </div>
             ` : ''}
             <div class="stat-grid-6">
                 <div class="stat-card sc-green" onclick="window.renderView('central')">
                     <div class="stat-val">${(state.stats.totalTypes || 0).toLocaleString()}</div>
                     <div class="stat-label">${t('stat_total_meds')}</div>
-                </div>
-                <div class="stat-card sc-teal" onclick="window.renderView('central')">
-                    <div class="stat-val">${(state.stats.totalMeds || 0).toLocaleString()}</div>
-                    <div class="stat-label">Total Unités (Stock)</div>
                 </div>
                 <div class="stat-card sc-red" onclick="window.renderView('expired')">
                     <div class="stat-val">${(state.stats.totalExpired || 0).toLocaleString()}</div>
