@@ -1309,14 +1309,22 @@ window.renderView = async function(viewName) {
     const viewContainer = document.getElementById('view-container');
     const pageTitle = document.getElementById('page-title');
 
-    
+    let content += `
+        <!-- Orphan Repair Tool (Global for Admin) -->
+        ${(currentUser && currentUser.role === 'admin') ? `
+        <div id="orphan-repair-container" style="display:none; margin-bottom: 20px; padding: 20px; background: #fff1f2; border: 2px dashed #f43f5e; border-radius: 12px;">
+            <h3 style="color: #be123c; margin-top: 0;"><i class="fa-solid fa-microscope"></i> أداة إصلاح الأدوية المفقودة (Inconnu)</h3>
+            <p style="font-size: 14px; color: #4b5563;">تم اكتشاف أدوية في المخزون ليس لها أسماء. يرجى ربطها بالدواء الصحيح من القائمة أدناه:</p>
+            <div id="orphan-repair-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+        </div>` : ''}
+    `;
     // Show loading indicator
     viewContainer.innerHTML = `<div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:100px; color:var(--primary-brand);">
         <i class="fa-solid fa-circle-notch fa-spin" style="font-size:3rem; margin-bottom:15px;"></i>
         <p style="font-weight:600;">${currentLang==='ar'?'جاري جلب البيانات...':'Chargement des données...'}</p>
     </div>`;
 
-    let content = '';
+    let ;
     
     if (viewName === 'dashboard') {
         pageTitle.innerText = t('page_dashboard');
@@ -1431,7 +1439,7 @@ window.renderView = async function(viewName) {
             </div>`;
         }
 
-        content = `
+        content += `
             ${alertHtml}
             ${currentUser.role === 'admin' ? migrationBtn : ''}
             ${ordersHtml}
@@ -1462,12 +1470,6 @@ window.renderView = async function(viewName) {
                 </div>
             </div>
 
-            <!-- Orphan Repair Tool (Only shows if orphans exist) -->
-            <div id="orphan-repair-container" style="display:none; margin-top: 30px; padding: 20px; background: #fff1f2; border: 2px dashed #f43f5e; border-radius: 12px;">
-                <h3 style="color: #be123c; margin-top: 0;"><i class="fa-solid fa-microscope"></i> أداة إصلاح الأدوية المفقودة (Inconnu)</h3>
-                <p style="font-size: 14px; color: #4b5563;">تم اكتشاف أدوية في المخزون ليس لها أسماء. يرجى ربطها بالدواء الصحيح من القائمة أدناه:</p>
-                <div id="orphan-repair-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
-            </div>
 
             <div class="dash-row">
                 <div class="dash-col shadow-sm">
@@ -1536,7 +1538,7 @@ window.renderView = async function(viewName) {
                 </div>`;
             }
 
-            content = `
+            content += `
                 ${ordersHtml}
                 <div class="page-header" style="justify-content: space-between;">
                     <div style="display:flex; gap:10px;">
@@ -1632,7 +1634,7 @@ window.renderView = async function(viewName) {
             .order('name', { ascending: true })
             .limit(2000);
         
-        content = `
+        content += `
             ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) ? `
             <div class="transfer-card">
                 <div class="block-title"><i class="fa-solid fa-truck-ramp-box" style="margin: 0 8px;"></i> Distribution par lots</div>
@@ -1966,7 +1968,7 @@ window.renderView = async function(viewName) {
         const pendingOrders = (state.orders || []).filter(o => o.status === 'PENDING').slice().reverse();
         const treatedOrders = (state.orders || []).filter(o => o.status === 'TREATED').slice().reverse();
 
-        content = `
+        content += `
             <div class="dash-row" style="margin-bottom:20px;">
                 <div class="dash-col" style="flex:1; border-top: 4px solid var(--highlight-gold);">
                     <div class="block-title" style="color:var(--highlight-gold);"><i class="fa-solid fa-clock"></i> Commandes en attente (${pendingOrders.length})</div>
@@ -2023,7 +2025,7 @@ window.renderView = async function(viewName) {
         const pending = (state.pendingReturns || []).slice().reverse();
         const history = (state.allReturns || []).filter(r => r.status !== 'PENDING').slice().reverse();
 
-        content = `
+        content += `
             <div class="dash-row" style="margin-bottom:20px;">
                 <div class="dash-col" style="flex:1; border-top: 4px solid var(--warning-orange);">
                     <div class="block-title" style="color:var(--warning-orange);"><i class="fa-solid fa-clock"></i> Demandes de retour en attente (${pending.length})</div>
@@ -2111,7 +2113,7 @@ window.renderView = async function(viewName) {
                 </tr>`;
             }).join('');
 
-            content = `
+            content += `
                 <div class="page-header" style="justify-content: space-between;">
                     <div style="display:flex; gap: 10px;">
                         ${currentUser && currentUser.role === 'admin' ? `
@@ -2191,7 +2193,7 @@ window.renderView = async function(viewName) {
                 </tr>
             `).join('');
 
-            content = `
+            content += `
                 <div class="page-header" style="justify-content: space-between;">
                     <div class="search-box">
                         <i class="fa-solid fa-search"></i>
@@ -2239,7 +2241,7 @@ window.renderView = async function(viewName) {
 
         let distReceipts = (state.receipts || []).filter(r => r.type === 'DISTRIBUTION').slice().reverse();
 
-        content = `
+        content += `
             <div class="table-container shadow-sm p-4">
                 <table class="data-table">
                     <thead>
@@ -2279,7 +2281,7 @@ window.renderView = async function(viewName) {
 
         const users = Object.keys(window.userDatabase).map(email => ({ email, ...window.userDatabase[email] }));
 
-        content = `
+        content += `
             <div class="page-header" style="justify-content: flex-end; gap: 10px;">
                 <button class="primary-btn" style="background:#f1f5f9; color:var(--text-main);" onclick="window.syncUsers()">
                     <i class="fa-solid fa-sync"></i> Recharger
@@ -2360,7 +2362,7 @@ window.renderView = async function(viewName) {
                 </tr>
             `).join('');
 
-            content = `
+            content += `
                 <div class="page-header" style="justify-content: space-between;">
                     <div class="search-box">
                         <i class="fa-solid fa-search"></i>
@@ -2406,7 +2408,7 @@ window.renderView = async function(viewName) {
             return `<tr><td><strong>${p.name.fr}</strong></td><td>${p.patients}</td><td>${stockDetails || '---'}</td></tr>`;
         }).join('');
 
-        content = `
+        content += `
             <div class="page-header" style="justify-content: flex-end;">
                 <div style="display:flex; gap: 10px;">
                     <button class="primary-btn btn-print" onclick="window.printPage()" style="background:var(--text-muted);"><i class="fa-solid fa-print"></i> ${t('btn_print')}</button>
@@ -2516,7 +2518,7 @@ window.renderView = async function(viewName) {
             `;
         }).join('');
 
-        content = `
+        content += `
             <div class="page-header" style="flex-direction: column; align-items: flex-start; gap: 15px;">
                 <div class="report-tabs">
                     <button class="report-tab ${timeframe === 'day' ? 'active' : ''}" onclick="window.setReportTab('day')">${t('th_day')}</button>
@@ -2622,7 +2624,7 @@ window.renderView = async function(viewName) {
             </tr>
         `).join('');
 
-        content = `
+        content += `
             <div class="page-header" style="justify-content: flex-end;">
                <button class="primary-btn btn-excel" onclick="window.exportToExcel('my-register-table', 'My_Register')" style="background:#059669;"><i class="fa-solid fa-file-excel"></i> ${t('btn_excel')}</button>
             </div>
@@ -2650,7 +2652,7 @@ window.renderView = async function(viewName) {
         pageTitle.innerText = "Gestion des Pharmacies";
         const plist = Object.entries(state.pharmacies); // [key, value] pairs
 
-        content = `
+        content += `
             <div class="page-header" style="justify-content: flex-end; gap: 10px;">
                 <button class="primary-btn" style="background:var(--danger-red);" onclick="window.resetCounters()">
                     <i class="fa-solid fa-rotate"></i> Réinitialiser les Compteurs (0)
@@ -2691,7 +2693,7 @@ window.renderView = async function(viewName) {
     }
     
     viewContainer.innerHTML = content;
-    if (viewName === 'dashboard') window.checkAndShowOrphanRepair();
+    window.checkAndShowOrphanRepair();
 
     // Listeners for Patients View (Merged here for reachability)
     if (viewName === 'patients') {
