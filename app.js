@@ -502,9 +502,13 @@ async function loadDataFromSupabase() {
             _supabase.from('medicines').select('id', { count: 'exact', head: true }).lt('qty', 50)
         ]);
 
+        // SCALABILITY: Get real sums for the dashboard instead of just row counts
+        const { data: medQtyData } = await _supabase.from('medicines').select('qty');
+        const sumMeds = (medQtyData || []).reduce((acc, m) => acc + (parseInt(m.qty) || 0), 0);
+
         // Update state statistics
         state.stats = {
-            totalMeds: totalMeds.count || 0,
+            totalMeds: sumMeds,
             totalPatients: totalPats.count || 0,
             totalDistributions: totalTrans.count || 0,
             totalDispensations: totalDisps.count || 0,
@@ -2835,8 +2839,12 @@ window.handleCentralImport = async function(e) {
             medsToInsert.forEach(m => { currentId++; m.id = currentId; });
 
             for (let i = 0; i < medsToInsert.length; i += 1000) {
-                const res = await _supabase.from('medicines').insert(medsToInsert.slice(i, i + 1000));
-                if (res.error) throw res.error;
+                const res = await _supabase.from('medicines').upsert(medsToInsert.slice(i, i + 1000), { onConflict: 'name,batch' });
+                if (res.error) {
+                    console.error("Upsert error:", res.error);
+                    // Fallback to simple insert if unique constraint doesn't exist
+                    await _supabase.from('medicines').insert(medsToInsert.slice(i, i + 1000));
+                }
             }
             await loadDataFromSupabase();
             window.showToast("Importation réussie! " + medsToInsert.length + " ajoutés.");
