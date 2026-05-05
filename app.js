@@ -396,6 +396,10 @@ let pagination = {
     analytical_pharm: { currentPage: 1, pageSize: 25, total: 0 }
 };
 
+// Global tracking for active pharmacy view (used by changePage for pharmacy pagination)
+window.activePharmacyId = null;
+window.activeSubView = 'all';
+
 async function fetchTableData(table, { page = 1, pageSize = 25, search = '', searchCol = 'name', filters = {}, order = { col: 'id', ascending: false }, select = '*' } = {}) {
     let query = _supabase.from(table).select(select, { count: 'exact' });
 
@@ -431,37 +435,6 @@ function debounceSearch(callback, ms = 500) {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(callback, ms);
 }
-
-function renderPaginationControls(view) {
-    const p = pagination[view];
-    if (!p || !p.total) return '';
-    const totalPages = Math.ceil(p.total / p.pageSize);
-    if (totalPages <= 1) return '';
-
-    return `
-    <div class="pagination-controls" style="display:flex; justify-content:center; align-items:center; gap:15px; margin-top:30px; padding:20px 0;">
-        <button class="primary-btn" style="padding:8px 15px; background:${p.currentPage === 1 ? '#e2e8f0' : 'var(--primary-brand)'}; color:${p.currentPage === 1 ? '#94a3b8' : '#fff'}; cursor:${p.currentPage === 1 ? 'not-allowed' : 'pointer'}" 
-            onclick="window.changePage('${view}', ${p.currentPage - 1})" ${p.currentPage === 1 ? 'disabled' : ''}>
-            <i class="fa-solid fa-chevron-left"></i> Précédent
-        </button>
-        <div style="display:flex; gap:8px; align-items:center;">
-            <span style="font-weight:700; color:var(--primary-brand); background:#f0f9ff; padding:5px 12px; border-radius:6px; border:1px solid #bae6fd;">${p.currentPage}</span>
-            <span style="color:#64748b; font-weight:600;">/ ${totalPages}</span>
-        </div>
-        <button class="primary-btn" style="padding:8px 15px; background:${p.currentPage >= totalPages ? '#e2e8f0' : 'var(--primary-brand)'}; color:${p.currentPage >= totalPages ? '#94a3b8' : '#fff'}; cursor:${p.currentPage >= totalPages ? 'not-allowed' : 'pointer'}" 
-            onclick="window.changePage('${view}', ${p.currentPage + 1})" ${p.currentPage >= totalPages ? 'disabled' : ''}>
-            Suivant <i class="fa-solid fa-chevron-right"></i>
-        </button>
-    </div>`;
-}
-
-window.changePage = function(view, page) {
-    if (pagination[view]) {
-        pagination[view].currentPage = page;
-        window.renderView(view);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-};
 
 
 async function fetchAllRecords(table, selectQuery = '*') {
@@ -1299,10 +1272,17 @@ window.attemptLogin = async function() {
     window.setLang('fr');
 }); // END of second DOMContentLoaded
 
+// Unified changePage: handles both generic views and pharmacy-specific views
 window.changePage = function(view, page) {
     if (!pagination[view]) return;
     pagination[view].currentPage = page;
-    window.renderView(view);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Pharmacy-specific pagination needs renderPharmacy, not renderView
+    if ((view === 'pharmacy_stock' || view === 'dispensations') && window.activePharmacyId) {
+        window.renderPharmacy(window.activePharmacyId, window.activeSubView);
+    } else {
+        window.renderView(view);
+    }
 };
 
 function renderPaginationControls(view, totalItems) {
@@ -2685,103 +2665,6 @@ window.renderView = async function(viewName) {
     
     viewContainer.innerHTML = content;
 
-    // View specific listeners
-    if (viewName === 'central') {
-        const searchInput = document.getElementById('search-med');
-        if(searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                const term = e.target.value.toLowerCase();
-                const filtered = state.medicines.filter(m => 
-                    m.name.toLowerCase().includes(term) || m.batch.toLowerCase().includes(term)
-                );
-                document.querySelector('#central-table tbody').innerHTML = generateCentralTableRows(filtered);
-            });
-        }
-        const importInput = document.getElementById('import-excel');
-        if(importInput) {
-            importInput.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if(!file) return;
-                window.showToast("Importation en cours...", "info");
-                const reader = new FileReader();
-                reader.onload = async function(evt) {
-                    try {
-                        const data = evt.target.result;
-                        const workbook = XLSX.read(data, {type: 'binary'});
-                        const firstSheet = workbook.SheetNames[0];
-                        const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1 });
-                        const medsToInsert = [];
-                        
-                        function cleanDate(val) {
-                            if (!val || String(val).trim() === '' || String(val).trim() === '-') return null;
-                            if (typeof val === 'number') {
-                                const d = new Date((val - (25567 + 2)) * 86400 * 1000);
-                                if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-                            }
-                            const d = new Date(val);
-                            return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
-                        }
-
-                        let hasHeaders = false;
-                        let nameIdx = 0, batchIdx = 1, qtyIdx = 2, entryIdx = 3, expIdx = 4, priceIdx = 5;
-
-                        if (rawRows.length > 0) {
-                            for (let i = 0; i < rawRows[0].length; i++) {
-                                let val = String(rawRows[0][i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                if (val.includes('name') || val.includes('دواء') || val.includes('med') || val.includes('nom') || val.includes('design') || val.includes('article') || val.includes('الاسم')) { hasHeaders = true; nameIdx = i; }
-                                else if (val.includes('batch') || val.includes('دفعة') || val.includes('lot') || val.includes('تشغيل')) { hasHeaders = true; batchIdx = i; }
-                                else if (val.includes('qty') || val.includes('كمي') || val.includes('quant') || val.includes('qte')) { hasHeaders = true; qtyIdx = i; }
-                                else if ((val.includes('entry') || val.includes('دخول') || val.includes('تاريخ') || val.includes('date')) && !val.includes('exp') && !val.includes('صلاح')) { hasHeaders = true; entryIdx = i; }
-                                else if (val.includes('exp') || val.includes('صلاح') || val.includes('انتهاء') || val.includes('perem')) { hasHeaders = true; expIdx = i; }
-                                else if (val.includes('price') || val.includes('prix') || val.includes('سعر') || val.includes('ثمن') || val.includes('achat')) { hasHeaders = true; priceIdx = i; }
-                            }
-                        }
-
-                        const startIndex = hasHeaders ? 1 : 0;
-
-                        for (let i = startIndex; i < rawRows.length; i++) {
-                            const r = rawRows[i];
-                            if (!r || r.length === 0) continue;
-
-                            let name = String(r[nameIdx] || '').trim();
-                            let batch = String(r[batchIdx] || 'N/A').trim();
-                            if (batch === '' || batch === 'undefined') batch = 'N/A';
-                            let qty = parseInt(r[qtyIdx]) || 0;
-                            let entryDate = cleanDate(r[entryIdx]);
-                            let expiry = cleanDate(r[expIdx]);
-                            let price = parseFloat(r[priceIdx]) || 0;
-
-                            if (name && name !== '' && name !== 'undefined' && name !== 'Unknown') {
-                                medsToInsert.push({ name, batch, qty, entry_date: entryDate, expiry_date: expiry, price });
-                            }
-                        }
-                        
-                        const { data: maxRows } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1);
-                        let currentId = (maxRows && maxRows.length > 0) ? parseInt(maxRows[0].id) : 0;
-                        
-                        medsToInsert.forEach(m => {
-                            currentId++;
-                            m.id = currentId;
-                        });
-
-                        // Chunking to avoid large payload errors
-                        for(let i = 0; i < medsToInsert.length; i += 1000) {
-                            const res = await _supabase.from('medicines').insert(medsToInsert.slice(i, i + 1000));
-                            if (res.error) throw res.error;
-                        }
-                        
-                        await loadDataFromSupabase();
-                        window.showToast("Importation réussie! " + medsToInsert.length + " ajoutés.");
-                        window.renderView('central');
-                    } catch (err) {
-                        console.error("Import error:", err);
-                        window.showToast("Erreur API lors de l'enregistrement", "error");
-                    }
-                };
-                reader.readAsBinaryString(file);
-            });
-        }
-    }
     // Listeners for Patients View (Merged here for reachability)
     if (viewName === 'patients') {
         const importPatientsInput = document.getElementById('import-patients-excel');
@@ -2828,6 +2711,80 @@ function generateCentralTableRows(meds) {
         `;
     }).join('');
 }
+
+// Central Stock Import Handler (standalone, so it works as an event listener reference)
+window.handleCentralImport = async function(e) {
+    const file = e.target.files[0];
+    if(!file) return;
+    window.showToast("Importation en cours...", "info");
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+        try {
+            const data = evt.target.result;
+            const workbook = XLSX.read(data, {type: 'binary'});
+            const firstSheet = workbook.SheetNames[0];
+            const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1 });
+            const medsToInsert = [];
+
+            function cleanDate(val) {
+                if (!val || String(val).trim() === '' || String(val).trim() === '-') return null;
+                if (typeof val === 'number') {
+                    const d = new Date((val - (25567 + 2)) * 86400 * 1000);
+                    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+                }
+                const d = new Date(val);
+                return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+            }
+
+            let hasHeaders = false;
+            let nameIdx = 0, batchIdx = 1, qtyIdx = 2, entryIdx = 3, expIdx = 4, priceIdx = 5;
+
+            if (rawRows.length > 0) {
+                for (let i = 0; i < rawRows[0].length; i++) {
+                    let val = String(rawRows[0][i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                    if (val.includes('name') || val.includes('dawa') || val.includes('med') || val.includes('nom') || val.includes('design') || val.includes('article')) { hasHeaders = true; nameIdx = i; }
+                    else if (val.includes('batch') || val.includes('lot') || val.includes('tashgil')) { hasHeaders = true; batchIdx = i; }
+                    else if (val.includes('qty') || val.includes('quant') || val.includes('qte')) { hasHeaders = true; qtyIdx = i; }
+                    else if ((val.includes('entry') || val.includes('date')) && !val.includes('exp') && !val.includes('perem')) { hasHeaders = true; entryIdx = i; }
+                    else if (val.includes('exp') || val.includes('perem')) { hasHeaders = true; expIdx = i; }
+                    else if (val.includes('price') || val.includes('prix') || val.includes('achat')) { hasHeaders = true; priceIdx = i; }
+                }
+            }
+
+            const startIndex = hasHeaders ? 1 : 0;
+            for (let i = startIndex; i < rawRows.length; i++) {
+                const r = rawRows[i];
+                if (!r || r.length === 0) continue;
+                let name = String(r[nameIdx] || '').trim();
+                let batch = String(r[batchIdx] || 'N/A').trim();
+                if (batch === '' || batch === 'undefined') batch = 'N/A';
+                let qty = parseInt(r[qtyIdx]) || 0;
+                let entryDate = cleanDate(r[entryIdx]);
+                let expiry = cleanDate(r[expIdx]);
+                let price = parseFloat(r[priceIdx]) || 0;
+                if (name && name !== '' && name !== 'undefined' && name !== 'Unknown') {
+                    medsToInsert.push({ name, batch, qty, entry_date: entryDate, expiry_date: expiry, price });
+                }
+            }
+
+            const { data: maxRows } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1);
+            let currentId = (maxRows && maxRows.length > 0) ? parseInt(maxRows[0].id) : 0;
+            medsToInsert.forEach(m => { currentId++; m.id = currentId; });
+
+            for (let i = 0; i < medsToInsert.length; i += 1000) {
+                const res = await _supabase.from('medicines').insert(medsToInsert.slice(i, i + 1000));
+                if (res.error) throw res.error;
+            }
+            await loadDataFromSupabase();
+            window.showToast("Importation réussie! " + medsToInsert.length + " ajoutés.");
+            window.renderView('central');
+        } catch (err) {
+            console.error("Import error:", err);
+            window.showToast("Erreur API lors de l'enregistrement", "error");
+        }
+    };
+    reader.readAsBinaryString(file);
+};
 
 window.handlePatientsImport = function(file) {
     window.showToast("Importation en cours...", "info");
@@ -2881,6 +2838,9 @@ window.handlePatientsImport = function(file) {
 };
 
 window.renderPharmacy = async function(pharmId, subView = 'all') {
+    // Track active pharmacy for pagination awareness
+    window.activePharmacyId = pharmId;
+    window.activeSubView = subView;
     const p = state.pharmacies[pharmId];
     pageTitle.innerText = p.name.fr;
     
