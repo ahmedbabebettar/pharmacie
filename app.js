@@ -580,6 +580,14 @@ async function loadDataFromSupabase() {
         const { data: pendingOrds } = await _supabase.from('orders').select('*');
         state.orders = pendingOrds || [];
 
+        window.updateSyncStatus('success');
+    } catch (err) {
+        console.error("Supabase Load Error:", err);
+        window.updateSyncStatus('error', 'Erreur de chargement');
+    }
+}
+
+
 // PATCH MARKER START - BULLETPROOF importPharmacyStock
 window.importPharmacyStock = async function(event, pharmId) {
     const file = event.target.files[0];
