@@ -713,8 +713,7 @@ window.importPharmacyStock = async function(event, pharmId) {
         }
     };
     reader.readAsBinaryString(file);
-
-
+};
 
 // =============================================
 // COUNTER LOGIC
@@ -1768,7 +1767,9 @@ window.renderView = async function(viewName) {
             // Scalability Fix: Fetch only required medicines from Supabase (since state.medicines is now empty)
             const medNamesRequested = Array.from(rows).map(r => {
                 const val = r.querySelector('.row-med-search').value;
-                return val.includes(' (Lot: ') ? val.split(' (Lot: ')[0] : val;
+                if (val.includes(' [')) return val.split(' [')[0].trim();
+                if (val.includes(' (')) return val.split(' (')[0].trim();
+                return val.trim();
             }).filter(n => n);
 
             if (medNamesRequested.length === 0) return;
@@ -1793,8 +1794,10 @@ window.renderView = async function(viewName) {
                 if (!searchValue || isNaN(qtyRequested)) continue;
 
                 let medName = searchValue;
-                if (searchValue.includes(' (Lot: ')) {
-                    medName = searchValue.split(' (Lot: ')[0];
+                if (searchValue.includes(' [')) {
+                    medName = searchValue.split(' [')[0].trim();
+                } else if (searchValue.includes(' (')) {
+                    medName = searchValue.split(' (')[0].trim();
                 }
 
                 // FEFO: Get matching batches from local tracking, sorted by expiry
@@ -1827,8 +1830,8 @@ window.renderView = async function(viewName) {
                 let remaining = qtyRequested;
 
                 // STRICT CHECK: If user explicitly picked a lot, it MUST be the best one
-                if (searchValue.includes(' (Lot: ')) {
-                    const selectedLot = searchValue.split(' (Lot: ')[1].split(' | ')[0];
+                if (searchValue.includes(' [Lot: ')) {
+                    const selectedLot = searchValue.split(' [Lot: ')[1].split(']')[0].trim();
                     const bestLot = eligibleBatches[0].batch;
                     if (selectedLot !== bestLot) {
                         const isManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
@@ -3438,8 +3441,11 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 if (!searchVal || isNaN(qtyRequested)) continue;
                 
                 let medName = searchVal;
+                // Clean up the name by removing everything after the first bracket or parenthesis
                 if (searchVal.includes(' [')) {
-                    medName = searchVal.split(' [')[0];
+                    medName = searchVal.split(' [')[0].trim();
+                } else if (searchVal.includes(' (')) {
+                    medName = searchVal.split(' (')[0].trim();
                 }
 
                 // FEFO for Pharmacy Stock
@@ -3613,7 +3619,6 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             }
         });
     }
-    }
     
     // Order Form Submittal (Bon de Commande)
     window.addOrderRow = function(id) {
@@ -3677,7 +3682,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             // Ensure pharmId is always valid
             const safePharmId = pharmId || (currentUser && currentUser.pharmacyId);
             if (!safePharmId) {
-                await window.showCustomDialog({ title: 'Erreur', msg: 'Impossible d''identifier la pharmacie. Veuillez vous reconnecter.', icon: 'fa-circle-xclamation' });
+                await window.showCustomDialog({ title: 'Erreur', msg: "Impossible d'identifier la pharmacie. Veuillez vous reconnecter.", icon: 'fa-circle-xclamation' });
                 return;
             }
 

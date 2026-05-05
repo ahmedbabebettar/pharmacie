@@ -1,36 +1,85 @@
--- 1. Create a temporary table to store the consolidated quantities
-CREATE TEMP TABLE med_consolidation AS
+-- 0. Ensure the 'price' column exists in medicines table
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='medicines' AND column_name='price') THEN
+        ALTER TABLE medicines ADD COLUMN price NUMERIC DEFAULT 0;
+    END IF;
+END $$;
+
+-- 1. Create a temporary table to store the consolidation mapping
+CREATE TEMP TABLE med_mapping AS
 SELECT 
-    MIN(id) as primary_id,
-    name, 
-    batch, 
+    id as old_id,
+    FIRST_VALUE(id) OVER (PARTITION BY name, batch ORDER BY id) as primary_id
+FROM medicines;
+
+-- 2. Create consolidation stats for updating primary records
+CREATE TEMP TABLE med_stats AS
+SELECT 
+    primary_id,
     SUM(qty) as total_qty, 
     MAX(entry_date) as latest_entry, 
     MAX(expiry_date) as latest_expiry, 
     AVG(price) as avg_price
-FROM medicines
-GROUP BY name, batch;
+FROM med_mapping m
+JOIN medicines med ON m.old_id = med.id
+GROUP BY primary_id;
 
--- 2. Delete all existing records from medicines
--- Note: This is safe because we will re-insert them, 
--- BUT we must be careful with foreign keys (pharmacy_stock, transfers).
--- To be safe, we will UPDATE the primary records and DELETE the duplicates.
+-- 3. Update references in other tables before deletion
+-- Update dispensations
+UPDATE dispensations d
+SET medicine_id = m.primary_id
+FROM med_mapping m
+WHERE d.medicine_id = m.old_id AND m.old_id != m.primary_id;
 
--- Update the primary records with the summed quantities
+-- Update transfers
+UPDATE transfers t
+SET medicine_id = m.primary_id
+FROM med_mapping m
+WHERE t.medicine_id = m.old_id AND m.old_id != m.primary_id;
+
+-- Update pharmacy_stock
+CREATE TEMP TABLE stock_consolidation AS
+SELECT 
+    pharmacy_id, 
+    m.primary_id as medicine_id, 
+    SUM(ps.qty) as total_qty
+FROM pharmacy_stock ps
+JOIN med_mapping m ON ps.medicine_id = m.old_id
+GROUP BY pharmacy_id, m.primary_id;
+
+DELETE FROM pharmacy_stock ps
+USING med_mapping m
+WHERE ps.medicine_id = m.old_id AND m.old_id != m.primary_id;
+
+UPDATE pharmacy_stock ps
+SET qty = sc.total_qty
+FROM stock_consolidation sc
+WHERE ps.pharmacy_id = sc.pharmacy_id AND ps.medicine_id = sc.medicine_id;
+
+INSERT INTO pharmacy_stock (pharmacy_id, medicine_id, qty)
+SELECT sc.pharmacy_id, sc.medicine_id, sc.total_qty
+FROM stock_consolidation sc
+ON CONFLICT (pharmacy_id, medicine_id) DO UPDATE SET qty = EXCLUDED.qty;
+
+-- 4. Update the primary medicines records
 UPDATE medicines m
 SET 
-    qty = c.total_qty,
-    entry_date = c.latest_entry,
-    expiry_date = c.latest_expiry,
-    price = c.avg_price
-FROM med_consolidation c
-WHERE m.id = c.primary_id;
+    qty = s.total_qty,
+    entry_date = s.latest_entry,
+    expiry_date = s.latest_expiry,
+    price = s.avg_price
+FROM med_stats s
+WHERE m.id = s.primary_id;
 
--- Delete the duplicates (those whose ID is not the primary_id for that name/batch)
+-- 5. Finally, delete the duplicate medicines
 DELETE FROM medicines
-WHERE id NOT IN (SELECT primary_id FROM med_consolidation);
+WHERE id NOT IN (SELECT DISTINCT primary_id FROM med_mapping);
 
--- 3. Add the unique constraint to prevent this from ever happening again
-ALTER TABLE medicines 
-ADD CONSTRAINT unique_med_name_batch 
-UNIQUE (name, batch);
+-- 6. Add the unique constraint to prevent duplicates in the future
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unique_med_name_batch') THEN
+        ALTER TABLE medicines ADD CONSTRAINT unique_med_name_batch UNIQUE (name, batch);
+    END IF;
+END $$;

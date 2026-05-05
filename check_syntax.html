@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Syntax Check</title>
+</head>
+<body>
+    <h1>Syntax Check</h1>
+    <script>
+        window.addEventListener('error', function(e) {
+            document.body.innerHTML += '<p style="color:red">Error: ' + e.message + ' at line ' + e.lineno + '</p>';
+        });
+    </script>
+    <script src="app.js"></script>
+    <script>
+        if (typeof i18n !== 'undefined') {
+            document.body.innerHTML += '<p style="color:green">Parsed successfully!</p>';
+        }
+    </script>
+</body>
+</html>
