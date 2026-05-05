@@ -384,6 +384,7 @@ const defaultState = {
     counters: { delivery: 0, order: 0 },
     stats: {
         totalMeds: 0,
+        totalTypes: 0,
         totalPatients: 0,
         totalDistributions: 0,
         totalDispensations: 0,
@@ -504,11 +505,15 @@ async function loadDataFromSupabase() {
 
         // SCALABILITY: Get real sums for the dashboard instead of just row counts
         const { data: medQtyData } = await _supabase.from('medicines').select('qty');
-        const sumMeds = (medQtyData || []).reduce((acc, m) => acc + (parseInt(m.qty) || 0), 0);
+        const sumMeds = (medQtyData || []).reduce((acc, m) => {
+            const q = parseInt(m.qty);
+            return acc + (isNaN(q) ? 0 : q);
+        }, 0);
 
         // Update state statistics
         state.stats = {
             totalMeds: sumMeds,
+            totalTypes: totalMeds.count || 0,
             totalPatients: totalPats.count || 0,
             totalDistributions: totalTrans.count || 0,
             totalDispensations: totalDisps.count || 0,
@@ -1423,33 +1428,29 @@ window.renderView = async function(viewName) {
             
             <div class="stat-grid-6">
                 <div class="stat-card sc-green" onclick="window.renderView('central')">
-                    <div class="stat-val">${state.stats.totalMeds.toLocaleString()}</div>
-                    <div class="stat-label">${t('stat_total_meds')}</div>
+                    <div class="stat-val">${(state.stats.totalMeds || 0).toLocaleString()}</div>
+                    <div class="stat-label">${t('stat_total_meds')} (Unités)</div>
+                </div>
+                <div class="stat-card sc-teal" onclick="window.renderView('central')">
+                    <div class="stat-val">${(state.stats.totalTypes || 0).toLocaleString()}</div>
+                    <div class="stat-label">Types de Méd.</div>
                 </div>
                 <div class="stat-card sc-red" onclick="window.renderView('expired')">
-                    <div class="stat-val">${state.stats.totalExpired.toLocaleString()}</div>
+                    <div class="stat-val">${(state.stats.totalExpired || 0).toLocaleString()}</div>
                     <div class="stat-label">Périmés</div>
                 </div>
                 <div class="stat-card sc-orange" onclick="window.renderView('central')">
                     <div class="stat-val">${(state.stats.totalLowStock || 0).toLocaleString()}</div>
                     <div class="stat-label">Stock Faible</div>
                 </div>
-                ${currentUser.role !== 'manager' ? `
-                <div class="stat-card sc-blue" onclick="window.renderView('reports')">
-                    <div class="stat-val">${Object.keys(state.pharmacies).length}</div>
-                    <div class="stat-label">${t('stat_pharmacies')}</div>
-                </div>
-                ` : ''}
-                <div class="stat-card sc-purple" onclick="window.renderView('distribution')">
-                    <div class="stat-val">${state.stats.totalDistributions.toLocaleString()}</div>
+                <div class="stat-card sc-blue" onclick="window.renderView('distribution')">
+                    <div class="stat-val">${(state.stats.totalDistributions || 0).toLocaleString()}</div>
                     <div class="stat-label">${t('stat_distributions')}</div>
                 </div>
-                ${currentUser.role !== 'manager' ? `
-                <div class="stat-card sc-teal" onclick="window.renderView('patients')">
-                    <div class="stat-val">${state.stats.totalPatients.toLocaleString()}</div>
+                <div class="stat-card sc-purple" onclick="window.renderView('patients')">
+                    <div class="stat-val">${(state.stats.totalPatients || 0).toLocaleString()}</div>
                     <div class="stat-label">${t('stat_patients')}</div>
                 </div>
-                ` : ''}
             </div>
 
             <div class="dash-row">
@@ -2773,20 +2774,44 @@ window.handleCentralImport = async function(e) {
                 }
             }
 
-            const { data: maxRows } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1);
-            let currentId = (maxRows && maxRows.length > 0) ? parseInt(maxRows[0].id) : 0;
-            medsToInsert.forEach(m => { currentId++; m.id = currentId; });
+            // Step 2: Smart Upsert Strategy
+            // We must preserve existing medicine IDs to keep database links (transfers, pharmacy stock) intact.
+            const { data: existingMeds } = await _supabase.from('medicines').select('id, name, batch');
+            const medMap = {};
+            (existingMeds || []).forEach(m => {
+                const key = `${String(m.name).toLowerCase().trim()}|${String(m.batch).toLowerCase().trim()}`;
+                medMap[key] = m.id;
+            });
 
-            for (let i = 0; i < medsToInsert.length; i += 1000) {
-                const res = await _supabase.from('medicines').upsert(medsToInsert.slice(i, i + 1000), { onConflict: 'name,batch' });
-                if (res.error) {
-                    console.error("Upsert error:", res.error);
-                    // Fallback to simple insert if unique constraint doesn't exist
-                    await _supabase.from('medicines').insert(medsToInsert.slice(i, i + 1000));
+            const finalMeds = medsToInsert.map(m => {
+                const key = `${String(m.name).toLowerCase().trim()}|${String(m.batch).toLowerCase().trim()}`;
+                if (medMap[key]) {
+                    return { ...m, id: medMap[key] }; // Update existing record
                 }
+                return m; // Insert new record
+            });
+
+            let successCount = 0;
+            for (let i = 0; i < finalMeds.length; i += 500) {
+                const chunk = finalMeds.slice(i, i + 500);
+                // Use upsert if unique constraint is available, otherwise fall back to explicit insert/update
+                const { error: upsertErr } = await _supabase.from('medicines').upsert(chunk, { onConflict: 'name,batch' });
+                
+                if (upsertErr) {
+                    console.warn("Standard Upsert failed, using manual batch processing:", upsertErr);
+                    for (const m of chunk) {
+                        if (m.id) {
+                            await _supabase.from('medicines').update(m).eq('id', m.id);
+                        } else {
+                            await _supabase.from('medicines').insert(m);
+                        }
+                    }
+                }
+                successCount += chunk.length;
             }
+
             await loadDataFromSupabase();
-            window.showToast("Importation réussie! " + medsToInsert.length + " ajoutés.");
+            window.showToast("Importation réussie! " + successCount + " articles traités.");
             window.renderView('central');
         } catch (err) {
             console.error("Import error:", err);
