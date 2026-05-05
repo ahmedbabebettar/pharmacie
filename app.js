@@ -1462,6 +1462,13 @@ window.renderView = async function(viewName) {
                 </div>
             </div>
 
+            <!-- Orphan Repair Tool (Only shows if orphans exist) -->
+            <div id="orphan-repair-container" style="display:none; margin-top: 30px; padding: 20px; background: #fff1f2; border: 2px dashed #f43f5e; border-radius: 12px;">
+                <h3 style="color: #be123c; margin-top: 0;"><i class="fa-solid fa-microscope"></i> أداة إصلاح الأدوية المفقودة (Inconnu)</h3>
+                <p style="font-size: 14px; color: #4b5563;">تم اكتشاف أدوية في المخزون ليس لها أسماء. يرجى ربطها بالدواء الصحيح من القائمة أدناه:</p>
+                <div id="orphan-repair-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+            </div>
+
             <div class="dash-row">
                 <div class="dash-col shadow-sm">
                     <div class="block-title"><i class="fa-solid fa-truck-ramp-box"></i> Distributions Récentes</div>
@@ -2684,6 +2691,7 @@ window.renderView = async function(viewName) {
     }
     
     viewContainer.innerHTML = content;
+    if (viewName === 'dashboard') window.checkAndShowOrphanRepair();
 
     // Listeners for Patients View (Merged here for reachability)
     if (viewName === 'patients') {
@@ -4802,5 +4810,98 @@ window.consolidateStock = async function() {
             console.error(err);
             window.showToast("Erreur lors de la consolidation", "error");
         }
+    }
+};
+
+window.checkAndShowOrphanRepair = async function() {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    
+    const container = document.getElementById('orphan-repair-container');
+    const list = document.getElementById('orphan-repair-list');
+    if (!container || !list) return;
+
+    // Efficiently find orphans: stock IDs that don't exist in medicines table
+    const { data: allStock } = await _supabase.from('pharmacy_stock').select('medicine_id');
+    const { data: allMeds } = await _supabase.from('medicines').select('id');
+    const medIds = new Set((allMeds || []).map(m => m.id));
+    const orphans = Array.from(new Set((allStock || []).map(s => s.medicine_id).filter(id => id && !medIds.has(id))));
+
+    if (orphans.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'block';
+    
+    // Get all valid medicines for the dropdown
+    const { data: validMeds } = await _supabase.from('medicines').select('id, name, batch').order('name');
+    const optionsHtml = (validMeds || []).map(m => `<option value="${m.id}">${m.name} [${m.batch}]</option>`).join('');
+
+    list.innerHTML = orphans.map(id => `
+        <div style="display:flex; align-items:center; gap:10px; padding:10px; background:#fff; border-radius:8px; border:1px solid #fecaca; margin-bottom:5px;">
+            <span style="font-weight:bold; color:#ef4444; min-width:120px;">Réf: ${id} (Inconnu)</span>
+            <i class="fa-solid fa-arrow-right" style="color:#94a3b8;"></i>
+            <select id="repair-select-${id}" style="flex:1; padding:8px; border-radius:6px; border:1px solid #d1d5db;">
+                <option value="">-- اختر الدواء الصحيح من القائمة --</option>
+                ${optionsHtml}
+            </select>
+            <button class="icon-btn" style="background:#059669; color:white; width:auto; padding:8px 15px; border-radius:6px;" onclick="window.repairOrphan(${id})">إصلاح</button>
+        </div>
+    `).join('');
+};
+
+window.repairOrphan = async function(oldId) {
+    const targetId = document.getElementById(`repair-select-${oldId}`).value;
+    if (!targetId) {
+        window.showToast("يرجى اختيار الدواء أولاً", "error");
+        return;
+    }
+
+    const confirmRepair = await window.showCustomDialog({
+        title: "تأكيد الإصلاح",
+        msg: `هل أنت متأكد من ربط الرقم ${oldId} بهذا الدواء؟ سيتم دمج كافة الكميات في كل الصيدليات.`,
+        type: 'confirm',
+        icon: 'fa-triangle-exclamation'
+    });
+    
+    if (!confirmRepair) return;
+
+    window.showToast("جاري الإصلاح...", "info");
+    
+    try {
+        // 1. Get all stock records for this orphan across all pharmacies
+        const { data: orphans } = await _supabase.from('pharmacy_stock').select('*').eq('medicine_id', oldId);
+        
+        if (orphans && orphans.length > 0) {
+            for (const orphan of orphans) {
+                // 2. Check if target exists in this pharmacy
+                const { data: existing } = await _supabase.from('pharmacy_stock')
+                    .select('*')
+                    .eq('pharmacy_id', orphan.pharmacy_id)
+                    .eq('medicine_id', targetId)
+                    .maybeSingle();
+                
+                if (existing) {
+                    // Update: Add qty to existing row
+                    await _supabase.from('pharmacy_stock')
+                        .update({ qty: existing.qty + orphan.qty })
+                        .eq('id', existing.id);
+                } else {
+                    // Insert: Create new row for target med
+                    await _supabase.from('pharmacy_stock')
+                        .insert([{ pharmacy_id: orphan.pharmacy_id, medicine_id: targetId, qty: orphan.qty }]);
+                }
+            }
+        }
+        
+        // 3. Delete orphans
+        await _supabase.from('pharmacy_stock').delete().eq('medicine_id', oldId);
+        
+        window.showToast("تم الإصلاح بنجاح!", "success");
+        await loadDataFromSupabase();
+        window.renderView('dashboard');
+    } catch (err) {
+        console.error(err);
+        window.showToast("حدث خطأ أثناء الإصلاح", "error");
     }
 };
