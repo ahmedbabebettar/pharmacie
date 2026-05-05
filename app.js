@@ -1309,7 +1309,7 @@ window.renderView = async function(viewName) {
     const viewContainer = document.getElementById('view-container');
     const pageTitle = document.getElementById('page-title');
 
-    let content += `
+    let content = `
         <!-- Orphan Repair Tool (Global for Admin) -->
         ${(currentUser && currentUser.role === 'admin') ? `
         <div id="orphan-repair-container" style="display:none; margin-bottom: 20px; padding: 20px; background: #fff1f2; border: 2px dashed #f43f5e; border-radius: 12px;">
