@@ -572,62 +572,20 @@ async function loadDataFromSupabase() {
         })) : [];
 
         // Fetch pending orders
-        const { data: pendingOrds } = await _supabase.from('orders').select('*').eq('status', 'PENDING').order('date', { ascending: false });
-        state.orders = pendingOrds || [];
-
-        console.log("Configuration loaded successfully!");
-        window.updateSyncStatus('success');
-
-        if (typeof window.updateSidebarPharmacies === 'function') {
-            window.updateSidebarPharmacies();
-        }
-
-        if (currentUser) {
-            if (currentUser.role === 'admin' || currentUser.role === 'manager') {
-                window.renderView(activeView || 'dashboard');
-            } else {
-                await window.renderPharmacy(currentUser.pharmacyId);
-            }
-        }
-    } catch (err) {
-        console.error("Error loading data:", err);
-        window.updateSyncStatus('error', 'Erreur de chargement');
-        window.showToast("Erreur DB: " + err.message, "error");
-    }
-}
-
-// Helper for date cleaning during import
-window.cleanDateForImport = function(val) {
-    if (!val || String(val).trim() === '' || String(val).trim() === '-') return null;
-    if (typeof val === 'number') {
-        // Excel serial date
-        const d = new Date((val - (25567 + 2)) * 86400 * 1000);
-        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-    }
-    const d = new Date(val);
-    return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
-};
-
-
-// PATCH MARKER START - importPharmacyStock clean rewrite
+        const { data: pendingOrds // PATCH MARKER START - BULLETPROOF importPharmacyStock
 window.importPharmacyStock = async function(event, pharmId) {
     const file = event.target.files[0];
     if(!file) return;
     
     const confirmClear = await window.showCustomDialog({
-        title: currentLang === "ar" ? "تنبيه: سيتم مسح المخزون الحالي" : "Attention: Le stock actuel sera effacé",
-        msg: currentLang === "ar" ? "سيتم حذف جميع الأدوية الحالية من هذه الصيدلية واستبدالها بالملف الجديد. هل أنت موافق؟" : "Tous les médicaments actuels de cette pharmacie seront supprimés et remplacés par le fichier importé. Confirmer?",
+        title: currentLang === "ar" ? "تأكيد عملية الاستيراد" : "Confirmation d'importation",
+        msg: currentLang === "ar" ? "سيتم تحديث كميات الأدوية في هذه الصيدلية. هل أنت متأكد؟" : "Le stock de cette pharmacie sera mis à jour. Continuer ?",
         type: "confirm",
         icon: "fa-file-import"
     });
     if (!confirmClear) { event.target.value = ""; return; }
 
-    // Delete all existing pharmacy_stock for this pharmacy first (clean slate)
-    window.showToast(currentLang === "ar" ? "جاري مسح المخزون القديم..." : "Suppression du stock actuel...", "info");
-    const { error: deleteErr } = await _supabase.from("pharmacy_stock").delete().eq("pharmacy_id", pharmId);
-    if (deleteErr) { console.error("Delete error:", deleteErr); }
-
-    window.showToast("Importation en cours...", "info");
+    window.showToast("Analyse du fichier...", "info");
     const reader = new FileReader();
     reader.onload = async function(evt) {
         try {
@@ -635,153 +593,110 @@ window.importPharmacyStock = async function(event, pharmId) {
             const workbook = XLSX.read(data, {type: 'binary'});
             const firstSheet = workbook.SheetNames[0];
             const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1, defval: '' });
-            const processedRows = [];
             
             if (rawRows.length === 0) { window.showToast("Fichier vide.", "error"); return; }
             
-            let nameIdx = -1, batchIdx = -1, qtyIdx = -1, expIdx = -1, startIndex = 0, headerFound = false;
+            let nameIdx = -1, batchIdx = -1, qtyIdx = -1, expIdx = -1, startIndex = 0;
             const firstRow = rawRows[0];
             for (let i = 0; i < firstRow.length; i++) {
                 let v = String(firstRow[i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                
-                // Precise mapping to avoid "Stock Central" being picked as "Qty"
-                if (v.includes('nom') || v.includes('name') || v.includes('article') || v.includes('designation') || v.includes('اسم') || v.includes('دواء')) { 
-                    if (nameIdx === -1) nameIdx = i; 
-                    headerFound = true; 
-                }
-                else if (v.includes('lot') || v.includes('batch') || v.includes('tashgil') || v.includes('تشغيل') || v.includes('لوت')) { 
-                    if (batchIdx === -1) batchIdx = i; 
-                    headerFound = true; 
-                }
-                else if (v === 'qty' || v === 'qte' || v === 'quantite' || v.includes('quant') || v.includes('كمية') || (v.includes('stock') && !v.includes('central'))) { 
-                    // Prioritize exact matches or specific keywords
-                    if (qtyIdx === -1 || v === 'qty' || v === 'quantite' || v === 'كمية') qtyIdx = i; 
-                    headerFound = true; 
-                }
-                else if (v.includes('exp') || v.includes('perem') || v.includes('انتهاء') || v.includes('صلاحية')) { 
-                    if (expIdx === -1) expIdx = i; 
-                    headerFound = true; 
-                }
+                if (v.includes('nom') || v.includes('name') || v.includes('article') || v.includes('اسم') || v.includes('دواء')) nameIdx = i;
+                else if (v.includes('lot') || v.includes('batch') || v.includes('تشغيل') || v.includes('لوت')) batchIdx = i;
+                else if (v === 'qty' || v === 'qte' || v === 'quantite' || v.includes('كمية') || (v.includes('stock') && !v.includes('central'))) qtyIdx = i;
+                else if (v.includes('exp') || v.includes('perem') || v.includes('صلاحية')) expIdx = i;
             }
-            // Fallback for indexes if not found by name
-            if (nameIdx === -1) nameIdx = 0;
+            if (nameIdx !== -1) startIndex = 1; else nameIdx = 0;
             if (batchIdx === -1) batchIdx = 1;
             if (qtyIdx === -1) qtyIdx = 2;
             if (expIdx === -1) expIdx = 3;
-            if (headerFound) startIndex = 1;
 
+            const processedRows = [];
             for (let i = startIndex; i < rawRows.length; i++) {
                 const r = rawRows[i];
-                if (!r || r.length === 0) continue;
-                let name = String(r[nameIdx] || '').trim();
-                let batch = String(r[batchIdx] || '').trim() || 'N/A';
-                let qty = parseInt(r[qtyIdx]) || 0;
-                let expiry = window.cleanDateForImport(r[expIdx]);
-                if (name && name !== '' && name !== 'undefined') processedRows.push({ name, batch, expiry, qty });
+                if (!r || !r[nameIdx]) continue;
+                const name = String(r[nameIdx]).trim();
+                const batch = String(r[batchIdx] || '').trim() || 'N/A';
+                const qty = parseInt(r[qtyIdx]) || 0;
+                const expiry = window.cleanDateForImport(r[expIdx]);
+                if (name) processedRows.push({ name, batch, expiry, qty });
             }
 
-            if (processedRows.length === 0) { window.showToast("Aucun medicament valide. Verifiez le fichier.", "error"); return; }
+            if (processedRows.length === 0) { throw new Error("Aucun médicament trouvé dans le fichier."); }
 
-            // Get max medicine ID ONCE before the loop to avoid BIGSERIAL sequence conflict
-            const { data: _maxIdRow } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
-            let _nextMedicineId = _maxIdRow ? (parseInt(_maxIdRow.id) + 1) : 1000;
+            window.updateSyncStatus('syncing', 'Mise à jour DB...');
 
-            // --- SCALABILITY REFACTOR: Bulk Processing ---
-            let successCount = 0, errorCount = 0;
-            const failedRows = [];
+            // Step 1: Ensure medicines exist (Upsert based on Name + Batch)
+            const { data: existingMeds } = await _supabase.from('medicines').select('id, name, batch');
+            const medMap = {};
+            (existingMeds || []).forEach(m => {
+                const key = `${m.name.toLowerCase()}|${m.batch.toLowerCase()}`;
+                medMap[key] = m.id;
+            });
 
-            // 1. Prepare unique identifier for each row (Name + Batch)
-            processedRows.forEach(r => r.key = `${r.name.toLowerCase().trim()}|${(r.batch||'').toLowerCase().trim()}`);
+            const newMeds = [];
+            const { data: maxIdRow } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
+            let nextId = maxIdRow ? (parseInt(maxIdRow.id) + 1) : 1000;
 
-            // 2. Fetch ALL existing medicines that match names in the file (Bulk Lookup)
-            const uniqueNames = [...new Set(processedRows.map(r => r.name))];
-            const { data: existingMeds } = await _supabase.from('medicines').select('*').in('name', uniqueNames);
-            
-            const medMap = {}; // Key -> ID
-            if (existingMeds) {
-                existingMeds.forEach(m => {
-                    const key = `${m.name.toLowerCase().trim()}|${(m.batch||'').toLowerCase().trim()}`;
+            const processedUnique = [];
+            const seen = new Set();
+            processedRows.forEach(r => {
+                const key = `${r.name.toLowerCase()}|${r.batch.toLowerCase()}`;
+                if (!seen.has(key)) {
+                    processedUnique.push(r);
+                    seen.add(key);
+                }
+            });
+
+            processedUnique.forEach(m => {
+                const key = `${m.name.toLowerCase()}|${m.batch.toLowerCase()}`;
+                if (!medMap[key]) {
+                    newMeds.push({
+                        id: nextId++,
+                        name: m.name,
+                        batch: m.batch,
+                        expiry_date: m.expiry,
+                        qty: 0,
+                        entry_date: new Date().toISOString().split('T')[0]
+                    });
+                }
+            });
+
+            if (newMeds.length > 0) {
+                const { data: inserted, error: insErr } = await _supabase.from('medicines').insert(newMeds).select();
+                if (insErr) throw insErr;
+                inserted.forEach(m => {
+                    const key = `${m.name.toLowerCase()}|${m.batch.toLowerCase()}`;
                     medMap[key] = m.id;
                 });
             }
 
-            // 3. Identify missing medicines and prepare bulk insert
-            const missingMeds = [];
-            const seenKeys = new Set();
-            processedRows.forEach(row => {
-                if (!medMap[row.key] && !seenKeys.has(row.key)) {
-                    missingMeds.push({
-                        id: _nextMedicineId++,
-                        name: row.name,
-                        batch: row.batch,
-                        expiry_date: row.expiry,
-                        qty: 0,
-                        entry_date: new Date().toISOString().split('T')[0]
-                    });
-                    seenKeys.add(row.key);
-                }
-            });
+            // Step 2: Clear and Update Stock
+            await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId);
 
-            // 4. Bulk Insert missing medicines in chunks of 1000
-            if (missingMeds.length > 0) {
-                for (let i = 0; i < missingMeds.length; i += 1000) {
-                    const chunk = missingMeds.slice(i, i + 1000);
-                    const { data: inserted, error: insErr } = await _supabase.from('medicines').insert(chunk).select('id, name, batch');
-                    if (insErr) {
-                        console.error("Bulk Med Insert Error:", insErr);
-                        // If bulk fails, we might have partial success or conflict
-                    }
-                    if (inserted) {
-                        inserted.forEach(m => {
-                            const key = `${m.name.toLowerCase().trim()}|${(m.batch||'').toLowerCase().trim()}`;
-                            medMap[key] = m.id;
-                        });
-                    }
-                }
-            }
-
-            // 5. Prepare and Bulk Upsert Pharmacy Stock
             const stockUpserts = processedRows.map(row => {
-                const medId = medMap[row.key];
+                const key = `${row.name.toLowerCase()}|${row.batch.toLowerCase()}`;
+                const medId = medMap[key];
                 if (!medId) return null;
-                return {
-                    pharmacy_id: pharmId,
-                    medicine_id: medId,
-                    qty: row.qty
-                };
+                return { pharmacy_id: pharmId, medicine_id: medId, qty: row.qty };
             }).filter(u => u !== null);
 
-            if (stockUpserts.length > 0) {
-                for (let i = 0; i < stockUpserts.length; i += 1000) {
-                    const chunk = stockUpserts.slice(i, i + 1000);
-                    const { error: upsertErr } = await _supabase.from('pharmacy_stock').upsert(chunk, { onConflict: 'pharmacy_id,medicine_id' });
-                    if (upsertErr) {
-                        errorCount += chunk.length;
-                        console.error("Bulk Stock Upsert Error:", upsertErr);
-                    } else {
-                        successCount += chunk.length;
-                    }
-                }
+            for (let i = 0; i < stockUpserts.length; i += 500) {
+                const chunk = stockUpserts.slice(i, i + 500);
+                const { error: upsertErr } = await _supabase.from('pharmacy_stock').upsert(chunk, { onConflict: 'pharmacy_id,medicine_id' });
+                if (upsertErr) console.error("Chunk failed:", upsertErr);
             }
 
+            window.showToast(currentLang === 'ar' ? 'تم الاستيراد بنجاح' : "Importation terminée !");
             await loadDataFromSupabase();
-            window.renderPharmacy(pharmId, 'all');
-            if (failedRows.length > 0) {
-                // Show failed medicines visibly in a dialog
-                const errMsg = failedRows.slice(0, 20).join("\\n");
-                console.warn("=== FAILED ROWS ===\\n" + errMsg);
-                await window.showCustomDialog({
-                    title: successCount + "/" + processedRows.length + " importes - " + errorCount + " erreurs",
-                    msg: "Medicaments non importes:\\n" + failedRows.slice(0, 10).map((r, i) => (i+1) + ". " + r).join("\\n"),
-                    icon: "fa-triangle-exclamation"
-                });
-            } else {
-                window.showToast("OK: " + successCount + "/" + processedRows.length + " articles importes!");
-            }
-        } catch (err) { console.error("Import error:", err); window.showToast("Erreur: " + (err.message || ''), "error"); }
+            await window.renderPharmacy(pharmId, 'all');
+        } catch (err) {
+            console.error("Critical Import Error:", err);
+            window.showCustomDialog({ title: "Erreur d'importation", msg: err.message, icon: "fa-circle-xmark" });
+            window.updateSyncStatus('error');
+        }
     };
     reader.readAsBinaryString(file);
-};
+
 
 
 // =============================================
@@ -2977,12 +2892,13 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }
     const pStockState = pagination[pStateKey];
 
+    // SCALABILITY: Use left join (default) instead of !inner to avoid rows disappearing if medicine join is slow/missing
     const { data: stockData, total: stockTotal } = await fetchTableData('pharmacy_stock', {
         page: pStockState.currentPage,
         pageSize: pStockState.pageSize,
         filters: { pharmacy_id: parseInt(pharmId) },
         search: pStockState.search,
-        select: '*, medicines!inner(name, batch, expiry_date)'
+        select: '*, medicines(name, batch, expiry_date)'
     });
     pStockState.total = stockTotal;
     
