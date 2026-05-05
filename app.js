@@ -410,6 +410,9 @@ async function fetchTableData(table, { page = 1, pageSize = 25, search = '', sea
         } else if (table === 'patients') {
             // Search in both name and national ID for patients
             query = query.or(`name.ilike.%${search}%,national_id.ilike.%${search}%`);
+        } else if (table === 'pharmacy_stock') {
+            // Search in joined medicines table (Name and Batch)
+            query = query.or(`name.ilike.%${search}%,batch.ilike.%${search}%`, { foreignTable: 'medicines' });
         } else {
             query = query.ilike(searchCol, `%${search}%`);
         }
@@ -2890,7 +2893,8 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         page: pStockState.currentPage,
         pageSize: pStockState.pageSize,
         filters: { pharmacy_id: pharmId },
-        select: '*, medicines(name, batch, expiry_date)'
+        search: pStockState.search,
+        select: '*, medicines!inner(name, batch, expiry_date)'
     });
     pStockState.total = stockTotal;
     
@@ -3202,8 +3206,12 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
         finalBody = `
             <div class="transfer-card animated fadeIn" style="border-top: 4px solid var(--accent-green);">
-                <div class="block-title" style="color:var(--accent-green); display:flex; justify-content:space-between;">
+                <div class="block-title" style="color:var(--accent-green); display:flex; justify-content:space-between; align-items:center;">
                     <span><i class="fa-solid fa-boxes-stacked"></i> Stock Actuel de la Pharmacie</span>
+                    <div class="search-box" style="margin:0; width:300px;">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-pharm-stock" placeholder="${t('search_placeholder')}" value="${pStockState.search || ''}">
+                    </div>
                     <span style="font-size:12px; color:#94a3b8;">${stockTotal} articles au total</span>
                 </div>
                 <div class="table-container shadow-sm">
@@ -3228,6 +3236,19 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }
 
     viewContainer.innerHTML = dashboardHeaderHtml + tabsHtml + finalBody;
+
+    // Search Listener for Pharmacy Stock
+    const pharmSearchInput = document.getElementById('search-pharm-stock');
+    if (pharmSearchInput) {
+        pharmSearchInput.focus();
+        const val = pharmSearchInput.value;
+        pharmSearchInput.value = ''; pharmSearchInput.value = val;
+        pharmSearchInput.addEventListener('input', (e) => {
+            pStockState.search = e.target.value;
+            pStockState.currentPage = 1;
+            debounceSearch(() => window.renderPharmacy(pharmId, subView), 500);
+        });
+    }
 
     // Helper: Add Row
     window.addDispRow = function(id) {
