@@ -1307,9 +1307,10 @@ window.changePage = function(view, page) {
     if (!pagination[view]) return;
     pagination[view].currentPage = page;
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    
     // Pharmacy-specific pagination needs renderPharmacy, not renderView
-    if ((view === 'pharmacy_stock' || view === 'dispensations') && window.activePharmacyId) {
-        window.renderPharmacy(window.activePharmacyId, window.activeSubView);
+    if ((view.startsWith('pharmacy_') || view === 'dispensations') && window.activePharmacyId) {
+        window.renderPharmacy(window.activePharmacyId, window.activeSubView || 'all');
     } else {
         window.renderView(view);
     }
@@ -2947,12 +2948,17 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         `;
     }
 
-    // Fetch Paginated Pharmacy Stock
-    const pStockState = pagination.pharmacy_stock;
+    // Fetch Paginated Pharmacy Stock (isolated per pharmacy)
+    const pStateKey = `pharmacy_${pharmId}`;
+    if (!pagination[pStateKey]) {
+        pagination[pStateKey] = { currentPage: 1, pageSize: 25, total: 0, search: '' };
+    }
+    const pStockState = pagination[pStateKey];
+
     const { data: stockData, total: stockTotal } = await fetchTableData('pharmacy_stock', {
         page: pStockState.currentPage,
         pageSize: pStockState.pageSize,
-        filters: { pharmacy_id: pharmId },
+        filters: { pharmacy_id: parseInt(pharmId) },
         search: pStockState.search,
         select: '*, medicines!inner(name, batch, expiry_date)'
     });
@@ -2967,22 +2973,23 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         expiry: s.medicines?.expiry_date || '-'
     }));
 
-    // Fetch counts and history
+    // Fetch counts and history (ensuring numeric ID for all queries)
+    const numericId = parseInt(pharmId);
     const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}, {data: searchableStockData}] = await Promise.all([
-        _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId),
-        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).lt('qty', 50),
-        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).filter('medicine_id', 'in', 
+        _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId),
+        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).lt('qty', 50),
+        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).filter('medicine_id', 'in', 
             (await _supabase.from('medicines').select('id').lt('expiry_date', new Date().toISOString().split('T')[0])).data?.map(m => m.id) || []
         ),
         fetchTableData('dispensations', { 
             page: pagination.dispensations.currentPage, 
             pageSize: pagination.dispensations.pageSize, 
-            filters: { pharmacy_id: pharmId },
+            filters: { pharmacy_id: numericId },
             order: { col: 'date', ascending: false }
         }),
         _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(1000),
         _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(100),
-        _supabase.from('pharmacy_stock').select('qty, medicines(id, name, batch, expiry_date)').eq('pharmacy_id', pharmId).gt('qty', 0).limit(2000)
+        _supabase.from('pharmacy_stock').select('qty, medicines(id, name, batch, expiry_date)').eq('pharmacy_id', numericId).gt('qty', 0).limit(2000)
     ]);
 
     const searchableStock = (searchableStockData || []).map(s => ({
@@ -3119,7 +3126,13 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     const stockHistoryHtml = `
         <div class="dash-row" style="margin-top:20px;">
             <div class="dash-col shadow-sm">
-                <div class="block-title">${t('stock_available')}</div>
+                <div class="block-title" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>${t('stock_available')}</span>
+                    <div class="search-box" style="margin:0; width:200px;">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-pharm-stock-${pharmId}" placeholder="Filtrer..." value="${pStockState.search || ''}" style="padding:4px 8px 4px 30px; font-size:12px;">
+                    </div>
+                </div>
                 <div class="table-container">
                     <table>
                         <thead>
@@ -3154,7 +3167,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                         </tbody>
                     </table>
                 </div>
-                ${renderPaginationControls('pharmacy_stock', stockTotal)}
+                ${renderPaginationControls(pStateKey)}
             </div>
             <div class="dash-col shadow-sm" style="flex: 2;">
                 <div class="block-title">${t('history_dispense')}</div>
@@ -3238,61 +3251,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     } else if (subView === 'pharm-order') {
         finalBody = orderHtml;
     } else {
-        // DEFAULT: Beautiful Stock View
-        const sRows = currentStock.map(m => {
-            const isExp = isExpired(m.expiry);
-            const isLow = m.qty < 50;
-            return `
-                <tr class="${isExp ? 'expired-row' : ''}">
-                    <td style="font-weight:700; color:var(--primary-brand);">${m.name}</td>
-                    <td><span class="badge-soft">${m.batch}</span></td>
-                    <td style="${isExp ? 'color:var(--danger-red); font-weight:700;' : ''}">${formatDate(m.expiry)}</td>
-                    <td>
-                        <span class="status-badge ${isLow ? 'warning' : 'good'}" style="font-size:14px; padding:4px 12px;">
-                            ${m.qty}
-                        </span>
-                    </td>
-                    <td style="text-align:left; display:flex; gap:5px;">
-                        <button class="icon-btn edit-btn" title="Délivrer" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')">
-                            <i class="fa-solid fa-hand-holding-medical"></i>
-                        </button>
-                        <button class="icon-btn" title="${t('btn_return')}" onclick="window.returnToCentral(${pharmId}, ${m.id})" style="background:#f1f5f9; color:#64748b;">
-                            <i class="fa-solid fa-rotate-left"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-
-        finalBody = `
-            <div class="transfer-card animated fadeIn" style="border-top: 4px solid var(--accent-green);">
-                <div class="block-title" style="color:var(--accent-green); display:flex; justify-content:space-between; align-items:center;">
-                    <span><i class="fa-solid fa-boxes-stacked"></i> Stock Actuel de la Pharmacie</span>
-                    <div class="search-box" style="margin:0; width:300px;">
-                        <i class="fa-solid fa-search"></i>
-                        <input type="text" id="search-pharm-stock" placeholder="${t('search_placeholder')}" value="${pStockState.search || ''}">
-                    </div>
-                    <span style="font-size:12px; color:#94a3b8;">${stockTotal} articles au total</span>
-                </div>
-                <div class="table-container shadow-sm">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Médicament</th>
-                                <th>Lot</th>
-                                <th>Expiration</th>
-                                <th>Quantité</th>
-                                <th style="text-align:right;">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${sRows || `<tr><td colspan="5" style="text-align:center; padding:50px; color:#94a3b8;">Le stock est vide.</td></tr>`}
-                        </tbody>
-                    </table>
-                </div>
-                ${renderPaginationControls('pharmacy_stock', stockTotal)}
-            </div>
-        `;
+        finalBody = stockHistoryHtml;
     }
 
     viewContainer.innerHTML = dashboardHeaderHtml + tabsHtml + finalBody;
@@ -3316,13 +3275,10 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         }, 300));
     }
 
-    // Search Listener for Pharmacy Stock
-    const pharmSearchInput = document.getElementById('search-pharm-stock');
-    if (pharmSearchInput) {
-        pharmSearchInput.focus();
-        const val = pharmSearchInput.value;
-        pharmSearchInput.value = ''; pharmSearchInput.value = val;
-        pharmSearchInput.addEventListener('input', (e) => {
+    // Handle Stock Search
+    const stockSearch = document.getElementById(`search-pharm-stock-${pharmId}`);
+    if(stockSearch) {
+        stockSearch.addEventListener('input', (e) => {
             pStockState.search = e.target.value;
             pStockState.currentPage = 1;
             debounceSearch(() => window.renderPharmacy(pharmId, subView), 500);
@@ -3675,7 +3631,13 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }
 };
 
-
+// Initialize Order Form Listener
+document.addEventListener('DOMContentLoaded', () => {
+    const userForm = document.getElementById('user-form');
+    if (userForm) {
+        userForm.addEventListener('submit', window.handleUserSubmit);
+    }
+});
 
 // Helper to bridge to distribution view
 window.openDistForPharmacy = function(pharmId) {
@@ -4358,12 +4320,6 @@ window.handleUserSubmit = async function(e) {
     }
 };
 
-// Initialize User Form Listener
-document.addEventListener('DOMContentLoaded', () => {
-    const userForm = document.getElementById('user-form');
-    if (userForm) {
-        userForm.addEventListener('submit', window.handleUserSubmit);
-    }
 });
 
 window.migrateUsersToCloud = async function() {
