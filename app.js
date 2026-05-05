@@ -1324,7 +1324,7 @@ window.renderView = async function(viewName) {
         <p style="font-weight:600;">${currentLang==='ar'?'جاري جلب البيانات...':'Chargement des données...'}</p>
     </div>`;
 
-    let ;
+    
     
     if (viewName === 'dashboard') {
         pageTitle.innerText = t('page_dashboard');
