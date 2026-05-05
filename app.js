@@ -2964,7 +2964,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             order: { col: 'date', ascending: false }
         }),
         _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(1000),
-        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(1000),
+        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(10000),
         _supabase.from('pharmacy_stock').select('qty, medicines(id, name, batch, expiry_date)').eq('pharmacy_id', pharmId).gt('qty', 0).limit(2000)
     ]);
 
