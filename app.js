@@ -2964,7 +2964,6 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             order: { col: 'date', ascending: false }
         }),
         _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(1000),
-        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(10000),
         _supabase.from('pharmacy_stock').select('qty, medicines(id, name, batch, expiry_date)').eq('pharmacy_id', pharmId).gt('qty', 0).limit(2000)
     ]);
 
@@ -3057,7 +3056,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     <label style="display:block; margin-bottom:8px; font-weight:800;">1. Choisir le Patient</label>
                     <input type="text" id="disp-patient-${pharmId}" list="patients-list" required placeholder="${t('patient_name')}" autocomplete="off" style="max-width: 400px; border: 2px solid var(--primary-brand);">
                     <datalist id="patients-list">
-                        ${(recentPats || []).map(pat => `<option value="${pat.name} (${pat.national_id || '-'})"></option>`).join('')}
+                        <!-- Dynamically populated via search -->
                     </datalist>
                 </div>
 
@@ -3279,6 +3278,25 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }
 
     viewContainer.innerHTML = dashboardHeaderHtml + tabsHtml + finalBody;
+
+    // Dynamic Patient Search (Infinite Scalability)
+    const patSearchInput = document.getElementById(`disp-patient-${pharmId}`);
+    if (patSearchInput) {
+        patSearchInput.addEventListener('input', window.debounce(async (e) => {
+            const val = e.target.value.trim();
+            if (val.length < 3) return; // Wait for 3 characters
+            
+            const { data } = await _supabase.from('patients')
+                .select('name, national_id')
+                .or(`name.ilike.%${val}%,national_id.ilike.%${val}%`)
+                .limit(15);
+            
+            if (data) {
+                const list = document.getElementById('patients-list');
+                list.innerHTML = data.map(p => `<option value="${p.name} (${p.national_id || '-'})"></option>`).join('');
+            }
+        }, 300));
+    }
 
     // Search Listener for Pharmacy Stock
     const pharmSearchInput = document.getElementById('search-pharm-stock');
