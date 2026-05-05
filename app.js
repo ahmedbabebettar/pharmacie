@@ -2271,9 +2271,6 @@ window.renderView = async function(viewName) {
         if(currentUser.role !== 'admin') { window.renderView('dashboard'); return; }
         pageTitle.innerText = "Gestion des Utilisateurs";
 
-        // removed recursive syncUsers() call to prevent infinite loop
-
-
         const users = Object.keys(window.userDatabase).map(email => ({ email, ...window.userDatabase[email] }));
 
         content = `
@@ -2939,9 +2936,12 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }));
 
     // Fetch counts and history
-    const [dispTotal, lowStockTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}] = await Promise.all([
+    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}] = await Promise.all([
         _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).lt('qty', 50),
+        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).filter('medicine_id', 'in', 
+            (await _supabase.from('medicines').select('id').lt('expiry_date', new Date().toISOString().split('T')[0])).data.map(m => m.id)
+        ),
         fetchTableData('dispensations', { 
             page: pagination.dispensations.currentPage, 
             pageSize: pagination.dispensations.pageSize, 
@@ -2970,20 +2970,22 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             ` : ''}
         </div>
         <!-- Pharmacy Stat Cards -->
-        <div class="stat-grid-5" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
-            <div class="stat-card sc-green">
+        <div class="stat-grid-6" style="margin-bottom: 24px;">
+            <div class="stat-card sc-green" onclick="window.renderPharmacy(${pharmId}, 'all')">
                 <div class="stat-val">${stockTotal}</div>
-                <div class="stat-label" style="text-transform: none; line-height: 1.4;">
-                    <strong>${currentLang === 'ar' ? 'إجمالي الأصناف' : 'Total Articles'}</strong>
-                </div>
+                <div class="stat-label">Stock Actuel</div>
             </div>
             <div class="stat-card sc-purple" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')">
                 <div class="stat-val">${dispTotal.count || 0}</div>
                 <div class="stat-label">Délivrances</div>
             </div>
-            <div class="stat-card sc-red">
+            <div class="stat-card sc-orange">
                 <div class="stat-val">${lowStockTotal.count || 0}</div>
                 <div class="stat-label">Stock Faible</div>
+            </div>
+            <div class="stat-card sc-red">
+                <div class="stat-val">${expiredTotal.count || 0}</div>
+                <div class="stat-label">Périmés</div>
             </div>
         </div>
     `;
@@ -3140,34 +3142,115 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     `;
 
     const tabsHtml = `
-        <div class="report-tabs no-print" style="margin-bottom: 25px; background: white; padding: 10px; border: 1px solid var(--border-color);">
+        <div class="report-tabs no-print" style="margin-bottom: 25px; background: white; padding: 10px; border: 1px solid var(--border-color); border-radius: 12px; box-shadow: var(--shadow-sm);">
             <button class="report-tab ${subView === 'all' ? 'active' : ''}" onclick="window.renderPharmacy(${pharmId}, 'all')">
-                <i class="fa-solid fa-chart-pie"></i> ${currentLang === 'ar' ? 'نظرة عامة' : 'Vue d\'ensemble'}
+                <i class="fa-solid fa-boxes-stacked"></i> ${currentLang === 'ar' ? 'المخزون' : 'Stock Actuel'}
             </button>
             <button class="report-tab ${subView === 'pharm-dispense' ? 'active' : ''}" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')">
-                <i class="fa-solid fa-hand-holding-medical"></i> ${currentLang === 'ar' ? 'إخراج أدوية للمرضى' : 'Délivrance'}
+                <i class="fa-solid fa-hand-holding-medical"></i> ${currentLang === 'ar' ? 'صرف دواء' : 'Délivrance'}
             </button>
-            <button class="report-tab ${subView === 'pharm-inbox' ? 'active' : ''}" onclick="window.renderPharmacy(${pharmId}, 'pharm-inbox')">
-                <i class="fa-solid fa-inbox"></i> ${currentLang === 'ar' ? 'الرسائل (الاستلام)' : 'Réception'}
+            <button class="report-tab ${subView === 'history' ? 'active' : ''}" onclick="window.renderPharmacy(${pharmId}, 'history')">
+                <i class="fa-solid fa-clock-rotate-left"></i> ${currentLang === 'ar' ? 'السجل' : 'Historique'}
             </button>
             <button class="report-tab ${subView === 'pharm-order' ? 'active' : ''}" onclick="window.renderPharmacy(${pharmId}, 'pharm-order')">
                 <i class="fa-solid fa-cart-shopping"></i> ${currentLang === 'ar' ? 'طلب توريد' : 'Commande'}
+            </button>
+            <button class="report-tab ${subView === 'pharm-inbox' ? 'active' : ''}" onclick="window.renderPharmacy(${pharmId}, 'pharm-inbox')">
+                <i class="fa-solid fa-inbox"></i> ${currentLang === 'ar' ? 'الرسائل' : 'Réception'}
             </button>
         </div>
     `;
 
     let finalBody = '';
-    if(subView === 'pharm-inbox') {
+    if (subView === 'history') {
+        const hRows = dispHistory.map(d => `
+            <tr>
+                <td><strong>PR-${d.reference || '-'}</strong></td>
+                <td>${formatDate(d.date)}</td>
+                <td>${d.patient_name}</td>
+                <td><strong>${d.medicine_name}</strong></td>
+                <td><span class="status-badge warning">-${d.qty}</span></td>
+                <td>${window.parseWorkerName(d.dispensed_by, currentLang)}</td>
+            </tr>
+        `).join('');
+
+        finalBody = `
+            <div class="transfer-card animated fadeIn">
+                <div class="block-title" style="color:var(--primary-brand);"><i class="fa-solid fa-clock-rotate-left"></i> Historique des Délivrances</div>
+                <div class="table-container shadow-sm">
+                    <table>
+                        <thead>
+                            <tr><th>Réf.</th><th>Date</th><th>Patient</th><th>Médicament</th><th>Quant.</th><th>Responsable</th></tr>
+                        </thead>
+                        <tbody>
+                            ${hRows || `<tr><td colspan="6" style="text-align:center; padding:30px; color:#94a3b8;">Aucun historique.</td></tr>`}
+                        </tbody>
+                    </table>
+                </div>
+                ${renderPaginationControls('dispensations', historyTotal)}
+            </div>
+        `;
+    } else if (subView === 'pharm-dispense') {
+        finalBody = dispenseHtml;
+    } else if (subView === 'pharm-inbox') {
         finalBody = notificationsHtml || `<div style="padding:40px; text-align:center; color:#7f8c8d; background:#fff; border-radius:10px; margin-top:20px;">Aucune décharge reçue pour le moment.</div>`;
     } else if (subView === 'pharm-order') {
         finalBody = orderHtml;
-    } else if (subView === 'pharm-dispense') {
-        finalBody = dispenseHtml + stockHistoryHtml;
     } else {
-        finalBody = dashboardHeaderHtml + stockHistoryHtml;
+        // DEFAULT: Beautiful Stock View
+        const sRows = currentStock.map(m => {
+            const isExp = isExpired(m.expiry);
+            const isLow = m.qty < 50;
+            return `
+                <tr class="${isExp ? 'expired-row' : ''}">
+                    <td style="font-weight:700; color:var(--primary-brand);">${m.name}</td>
+                    <td><span class="badge-soft">${m.batch}</span></td>
+                    <td style="${isExp ? 'color:var(--danger-red); font-weight:700;' : ''}">${formatDate(m.expiry)}</td>
+                    <td>
+                        <span class="status-badge ${isLow ? 'warning' : 'good'}" style="font-size:14px; padding:4px 12px;">
+                            ${m.qty}
+                        </span>
+                    </td>
+                    <td style="text-align:left; display:flex; gap:5px;">
+                        <button class="icon-btn edit-btn" title="Délivrer" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')">
+                            <i class="fa-solid fa-hand-holding-medical"></i>
+                        </button>
+                        <button class="icon-btn" title="${t('btn_return')}" onclick="window.returnToCentral(${pharmId}, ${m.id})" style="background:#f1f5f9; color:#64748b;">
+                            <i class="fa-solid fa-rotate-left"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        finalBody = `
+            <div class="transfer-card animated fadeIn" style="border-top: 4px solid var(--accent-green);">
+                <div class="block-title" style="color:var(--accent-green); display:flex; justify-content:space-between;">
+                    <span><i class="fa-solid fa-boxes-stacked"></i> Stock Actuel de la Pharmacie</span>
+                    <span style="font-size:12px; color:#94a3b8;">${stockTotal} articles au total</span>
+                </div>
+                <div class="table-container shadow-sm">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Médicament</th>
+                                <th>Lot</th>
+                                <th>Expiration</th>
+                                <th>Quantité</th>
+                                <th style="text-align:right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sRows || `<tr><td colspan="5" style="text-align:center; padding:50px; color:#94a3b8;">Le stock est vide.</td></tr>`}
+                        </tbody>
+                    </table>
+                </div>
+                ${renderPaginationControls('pharmacy_stock', stockTotal)}
+            </div>
+        `;
     }
 
-    viewContainer.innerHTML = tabsHtml + finalBody;
+    viewContainer.innerHTML = dashboardHeaderHtml + tabsHtml + finalBody;
 
     // Helper: Add Row
     window.addDispRow = function(id) {
