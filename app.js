@@ -372,7 +372,14 @@ const defaultState = {
     patients: [],
     receipts: [],
     orders: [],
-    counters: { delivery: 0, order: 0 }
+    counters: { delivery: 0, order: 0 },
+    stats: {
+        totalMeds: 0,
+        totalPatients: 0,
+        totalDistributions: 0,
+        totalDispensations: 0,
+        totalExpired: 0
+    }
 };
 
 let state = defaultState;
@@ -472,6 +479,11 @@ async function fetchAllRecords(table, selectQuery = '*') {
 }
 
 async function loadDataFromSupabase() {
+    if (!_supabase) {
+        console.warn("Supabase not initialized. Skipping cloud sync.");
+        window.updateSyncStatus('error', 'Mode Hors-ligne');
+        return;
+    }
     try {
         window.updateSyncStatus('syncing');
         console.log("Fetching configuration from Supabase...");
