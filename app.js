@@ -2418,29 +2418,43 @@ window.renderView = async function(viewName) {
     }
     else if (viewName === 'analytical_reports' && currentUser && currentUser.role === 'admin') {
         pageTitle.innerText = t('nav_analyses');
-        
         const timeframe = activeReportTab; // 'day', 'week', 'month', 'year'
 
-        // Grouping 1 (By Pharmacy): { periodKey: { pharmId: { patients: Set, meds: { medName: qty } } } }
+        // Fetch Data for the selected timeframe
+        let startDate = new Date();
+        if (timeframe === 'day') startDate.setDate(startDate.getDate() - 2); // Show last 2 days
+        else if (timeframe === 'week') startDate.setDate(startDate.getDate() - 14); // Show last 2 weeks
+        else if (timeframe === 'month') startDate.setMonth(startDate.getMonth() - 3); // Show last 3 months
+        else if (timeframe === 'year') startDate.setFullYear(startDate.getFullYear() - 1); // Show last year
+        
+        const isoStart = startDate.toISOString().split('T')[0];
+        const { data: reportData } = await _supabase.from('dispensations').select('*').gte('date', isoStart);
+        const dispensations = reportData || [];
+
+        // Grouping 1 (By Pharmacy)
         const groups = {};
-        // Grouping 2 (Global by Medicine): { periodKey: { medName: totalQty } }
+        // Grouping 2 (Global by Medicine)
         const globalMedGroups = {};
 
-        state.dispensations.forEach(d => {
+        dispensations.forEach(d => {
             const key = getGroupedKey(d.date, timeframe);
+            const pId = d.pharmacy_id || d.pharmacyId;
+            const mName = d.medicine_name || d.medName;
+            const pName = d.patient_name || d.patientName;
+            const qty = d.qty;
             
             // For Pharmacy Details
             if(!groups[key]) groups[key] = {};
-            if(!groups[key][d.pharmacyId]) groups[key][d.pharmacyId] = { patients: new Set(), meds: {} };
-            groups[key][d.pharmacyId].patients.add(d.patientName);
-            if(!groups[key][d.pharmacyId].meds[d.medName]) groups[key][d.pharmacyId].meds[d.medName] = 0;
-            groups[key][d.pharmacyId].meds[d.medName] += d.qty;
+            if(!groups[key][pId]) groups[key][pId] = { patients: new Set(), meds: {} };
+            groups[key][pId].patients.add(pName);
+            if(!groups[key][pId].meds[mName]) groups[key][pId].meds[mName] = 0;
+            groups[key][pId].meds[mName] += qty;
 
             // For Global Medicine Report
             if(!globalMedGroups[key]) globalMedGroups[key] = {};
-            if(!globalMedGroups[key][d.medName]) globalMedGroups[key][d.medName] = { qty: 0, patients: new Set() };
-            globalMedGroups[key][d.medName].qty += d.qty;
-            globalMedGroups[key][d.medName].patients.add(d.patientName);
+            if(!globalMedGroups[key][mName]) globalMedGroups[key][mName] = { qty: 0, patients: new Set() };
+            globalMedGroups[key][mName].qty += qty;
+            globalMedGroups[key][mName].patients.add(pName);
         });
 
         const sortedPeriods = Object.keys(groups).sort((a,b) => new Date(b) - new Date(a));
