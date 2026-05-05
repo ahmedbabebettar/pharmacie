@@ -2164,7 +2164,7 @@ window.renderView = async function(viewName) {
             const { data: meds, total } = await fetchTableData('medicines', {
                 page: p.currentPage,
                 pageSize: p.pageSize,
-                filter: { col: 'expiry_date', val: now, op: 'lt' },
+                filters: { expiry_date: { val: now, op: 'lt' } },
                 order: { col: 'expiry_date', ascending: true }
             });
             p.total = total;
@@ -2317,7 +2317,7 @@ window.renderView = async function(viewName) {
                 page: p.currentPage,
                 pageSize: p.pageSize,
                 search: p.search,
-                searchCol: 'med_name',
+                searchCol: 'medicine_name',
                 order: { col: 'date', ascending: false }
             });
             p.total = total;
@@ -2327,9 +2327,9 @@ window.renderView = async function(viewName) {
                     <td><small><strong>${d.reference || '-'}</strong></small></td>
                     <td>${formatDate(d.date)}</td>
                     <td><span class="status-badge warning">${t('action_dispense')}</span></td>
-                    <td><strong>${d.med_name}</strong></td>
+                    <td><strong>${d.medicine_name}</strong></td>
                     <td><span dir="ltr">-${d.qty}</span></td>
-                    <td>${d.patient_name}</td>
+                    <td>${d.patient_name || '-'}</td>
                     <td>${window.parseWorkerName(d.dispensed_by, currentLang)}</td>
                 </tr>
             `).join('');
@@ -2729,61 +2729,14 @@ window.renderView = async function(viewName) {
             });
         }
     }
-    // Listeners for Patients View
-    else if (viewName === 'patients' && currentUser && currentUser.role === 'admin') {
+    // Listeners for Patients View (Merged here for reachability)
+    if (viewName === 'patients') {
         const importPatientsInput = document.getElementById('import-patients-excel');
         if(importPatientsInput) {
             importPatientsInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 if(!file) return;
-                window.showToast("Importation en cours...", "info");
-                const reader = new FileReader();
-                reader.onload = async function(evt) {
-                    try {
-                        const data = evt.target.result;
-                        const workbook = XLSX.read(data, {type: 'binary'});
-                        const firstSheet = workbook.SheetNames[0];
-                        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
-                        const patsToInsert = [];
-                        rows.forEach(r => {
-                            let name = 'Unknown', nid = '-', phone = '-', hospital = '-';
-                            let keys = Object.keys(r);
-                            for (let ObjectKey of keys) {
-                                let k = ObjectKey.trim().toLowerCase();
-                                let val = r[ObjectKey];
-                                if (k.includes('الاسم') || k.includes('name') || k.includes('مريض')) name = val;
-                                else if (k.includes('وطني') || k.includes('national') || k.includes('identit') || (k.includes('رقم') && k.includes('تعريف'))) nid = val;
-                                else if (k.includes('هاتف') || k.includes('جوال') || k.includes('phone') || k.includes('tel') || k.includes('téléphone')) phone = val;
-                                else if (k.includes('مستشفى') || k.includes('مركز') || k.includes('جهة') || k.includes('hospital') || k.includes('hopital') || k.includes('hôpital') || k.includes('structure') || k.includes('etablissement') || k.includes('يتابع')) hospital = val;
-                            }
-                            if (name === 'Unknown' && keys.length > 0) name = r[keys[0]];
-                            if(name && name !== 'Unknown') {
-                                patsToInsert.push({ name, national_id: nid, phone, hospital });
-                            }
-                        });
-                        
-                        const { data: maxRowsPats } = await _supabase.from('patients').select('id').order('id', { ascending: false }).limit(1);
-                        let currentPatId = (maxRowsPats && maxRowsPats.length > 0) ? parseInt(maxRowsPats[0].id) : 0;
-                        
-                        patsToInsert.forEach(p => {
-                            currentPatId++;
-                            p.id = currentPatId;
-                        });
-
-                        for(let i = 0; i < patsToInsert.length; i += 1000) {
-                            const res = await _supabase.from('patients').insert(patsToInsert.slice(i, i + 1000));
-                            if (res.error) throw res.error;
-                        }
-                        
-                        await loadDataFromSupabase();
-                        window.showToast(t('alert_success'));
-                        window.renderView('patients');
-                    } catch (err) {
-                        console.error("Import patients error:", err);
-                        window.showToast("Erreur d'importation des patients", "error");
-                    }
-                };
-                reader.readAsBinaryString(file);
+                window.handlePatientsImport(file);
             });
         }
     }
@@ -2822,6 +2775,57 @@ function generateCentralTableRows(meds) {
         `;
     }).join('');
 }
+
+window.handlePatientsImport = function(file) {
+    window.showToast("Importation en cours...", "info");
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+        try {
+            const data = evt.target.result;
+            const workbook = XLSX.read(data, {type: 'binary'});
+            const firstSheet = workbook.SheetNames[0];
+            const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
+            const patsToInsert = [];
+            rows.forEach(r => {
+                let name = 'Unknown', nid = '-', phone = '-', hospital = '-';
+                let keys = Object.keys(r);
+                for (let ObjectKey of keys) {
+                    let k = ObjectKey.trim().toLowerCase();
+                    let val = r[ObjectKey];
+                    if (k.includes('الاسم') || k.includes('name') || k.includes('مريض')) name = val;
+                    else if (k.includes('وطني') || k.includes('national') || k.includes('identit') || (k.includes('رقم') && k.includes('تعريف'))) nid = val;
+                    else if (k.includes('هاتف') || k.includes('جوال') || k.includes('phone') || k.includes('tel') || k.includes('téléphone')) phone = val;
+                    else if (k.includes('مستشفى') || k.includes('مركز') || k.includes('جهة') || k.includes('hospital') || k.includes('hopital') || k.includes('hôpital') || k.includes('structure') || k.includes('etablissement') || k.includes('يتابع')) hospital = val;
+                }
+                if (name === 'Unknown' && keys.length > 0) name = r[keys[0]];
+                if(name && name !== 'Unknown') {
+                    patsToInsert.push({ name, national_id: nid, phone, hospital });
+                }
+            });
+            
+            const { data: maxRowsPats } = await _supabase.from('patients').select('id').order('id', { ascending: false }).limit(1);
+            let currentPatId = (maxRowsPats && maxRowsPats.length > 0) ? parseInt(maxRowsPats[0].id) : 0;
+            
+            patsToInsert.forEach(p => {
+                currentPatId++;
+                p.id = currentPatId;
+            });
+
+            for(let i = 0; i < patsToInsert.length; i += 1000) {
+                const res = await _supabase.from('patients').insert(patsToInsert.slice(i, i + 1000));
+                if (res.error) throw res.error;
+            }
+            
+            await loadDataFromSupabase();
+            window.showToast(t('alert_success'));
+            window.renderView('patients');
+        } catch (err) {
+            console.error("Import patients error:", err);
+            window.showToast("Erreur d'importation des patients", "error");
+        }
+    };
+    reader.readAsBinaryString(file);
+};
 
 window.renderPharmacy = async function(pharmId, subView = 'all') {
     const p = state.pharmacies[pharmId];
