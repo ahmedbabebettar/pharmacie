@@ -391,7 +391,9 @@ let pagination = {
     expired: { currentPage: 1, pageSize: 25, total: 0, search: '' },
     transfers: { currentPage: 1, pageSize: 25, total: 0, search: '' },
     dispensations: { currentPage: 1, pageSize: 25, total: 0, search: '' },
-    pharmacy_stock: { currentPage: 1, pageSize: 25, total: 0, search: '' }
+    pharmacy_stock: { currentPage: 1, pageSize: 25, total: 0, search: '' },
+    analytical_global: { currentPage: 1, pageSize: 25, total: 0 },
+    analytical_pharm: { currentPage: 1, pageSize: 25, total: 0 }
 };
 
 async function fetchTableData(table, { page = 1, pageSize = 25, search = '', searchCol = 'name', filters = {}, order = { col: 'id', ascending: false }, select = '*' } = {}) {
@@ -2459,38 +2461,55 @@ window.renderView = async function(viewName) {
 
         const sortedPeriods = Object.keys(groups).sort((a,b) => new Date(b) - new Date(a));
         
-        // Build Pharmacy Details Rows
-        let pharmRows = '';
+        // Flatten for pagination
+        const flatPharmRows = [];
         sortedPeriods.forEach(pKey => {
             Object.keys(groups[pKey]).forEach(pId => {
-                const data = groups[pKey][pId];
-                const medSummary = Object.keys(data.meds).map(m => `<span>${m}: <strong>${data.meds[m]}</strong></span>`).join(' | ');
-                pharmRows += `
-                    <tr>
-                        <td style="white-space:nowrap;"><strong>${pKey}</strong></td>
-                        <td>${state.pharmacies[pId].name.fr}</td>
-                        <td style="text-align:center;"><span class="status-badge info">${data.patients.size}</span></td>
-                        <td>${medSummary}</td>
-                    </tr>
-                `;
+                flatPharmRows.push({ pKey, pId, data: groups[pKey][pId] });
             });
         });
-
-        // Build Global Medicine Report Rows
-        let globalRows = '';
+        const flatGlobalRows = [];
         sortedPeriods.forEach(pKey => {
             const meds = globalMedGroups[pKey];
             Object.keys(meds).forEach(mName => {
-                globalRows += `
-                    <tr>
-                        <td style="white-space:nowrap;"><strong>${pKey}</strong></td>
-                        <td><strong>${mName}</strong></td>
-                        <td style="text-align:center;"><span class="status-badge info">${meds[mName].patients.size}</span></td>
-                        <td style="text-align:center;"><span class="status-badge good">${meds[mName].qty}</span></td>
-                    </tr>
-                `;
+                flatGlobalRows.push({ pKey, mName, data: meds[mName] });
             });
         });
+
+        // Update pagination totals
+        pagination.analytical_pharm.total = flatPharmRows.length;
+        pagination.analytical_global.total = flatGlobalRows.length;
+
+        // Slice rows
+        const pharmPage = pagination.analytical_pharm;
+        const globalPage = pagination.analytical_global;
+        const slicedPharm = flatPharmRows.slice((pharmPage.currentPage - 1) * pharmPage.pageSize, pharmPage.currentPage * pharmPage.pageSize);
+        const slicedGlobal = flatGlobalRows.slice((globalPage.currentPage - 1) * globalPage.pageSize, globalPage.currentPage * globalPage.pageSize);
+
+        // Build Pharmacy Details Rows
+        let pharmRows = slicedPharm.map(row => {
+            const medSummary = Object.keys(row.data.meds).map(m => `<span>${m}: <strong>${row.data.meds[m]}</strong></span>`).join(' | ');
+            return `
+                <tr>
+                    <td style="white-space:nowrap;"><strong>${row.pKey}</strong></td>
+                    <td>${state.pharmacies[row.pId]?.name?.fr || 'Pharmacie #'+row.pId}</td>
+                    <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
+                    <td>${medSummary}</td>
+                </tr>
+            `;
+        }).join('');
+
+        // Build Global Medicine Report Rows
+        let globalRows = slicedGlobal.map(row => {
+            return `
+                <tr>
+                    <td style="white-space:nowrap;"><strong>${row.pKey}</strong></td>
+                    <td><strong>${row.mName}</strong></td>
+                    <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
+                    <td style="text-align:center;"><span class="status-badge good">${row.data.qty}</span></td>
+                </tr>
+            `;
+        }).join('');
 
         content = `
             <div class="page-header" style="flex-direction: column; align-items: flex-start; gap: 15px;">
@@ -2524,9 +2543,10 @@ window.renderView = async function(viewName) {
                     </tbody>
                 </table>
             </div>
+            ${renderPaginationControls('analytical_global')}
 
             <!-- Pharmacy Detail Section -->
-            <div class="table-header" style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+            <div class="table-header" style="margin-bottom:10px; margin-top:30px; display:flex; justify-content:space-between; align-items:center;">
                 <span><i class="fa-solid fa-hospital"></i> ${t('nav_analyses')} (${t('th_pharmacy')})</span>
                 <button class="primary-btn btn-excel" onclick="window.exportToExcel('pharmacy-report-table', 'Report_Pharmacies_${timeframe}')" style="background:#059669; font-size:12px; padding:4px 10px;">
                     <i class="fa-solid fa-file-excel"></i> Excel
@@ -2547,6 +2567,7 @@ window.renderView = async function(viewName) {
                     </tbody>
                 </table>
             </div>
+            ${renderPaginationControls('analytical_pharm')}
         `;
 
         // Export active tab setter to window
