@@ -1292,7 +1292,8 @@ window.changePage = function(view, page) {
 function renderPaginationControls(view, totalItems) {
     const p = pagination[view];
     if (!p) return '';
-    const totalPages = Math.ceil(totalItems / p.pageSize);
+    const total = (totalItems !== undefined) ? totalItems : (p.total || 0);
+    const totalPages = Math.ceil(total / p.pageSize);
     if (totalPages <= 1) return '';
 
     let buttons = '';
@@ -1311,9 +1312,12 @@ function renderPaginationControls(view, totalItems) {
         buttons += `<button class="pagination-btn" onclick="window.changePage('${view}', ${p.currentPage + 1})">Suivant <i class="fa-solid fa-chevron-right"></i></button>`;
     }
 
+    const currentStart = total === 0 ? 0 : (p.currentPage - 1) * p.pageSize + 1;
+    const currentEnd = Math.min(p.currentPage * p.pageSize, total);
+
     return `
         <div class="pagination-container">
-            <div class="pagination-info">Affichage de ${(p.currentPage - 1) * p.pageSize + 1} à ${Math.min(p.currentPage * p.pageSize, totalItems)} sur ${totalItems}</div>
+            <div class="pagination-info">Affichage de ${currentStart} à ${currentEnd} sur ${total}</div>
             <div class="pagination-buttons">${buttons}</div>
         </div>
     `;
@@ -1466,6 +1470,7 @@ window.renderView = async function(viewName) {
                 <div class="stat-card sc-orange" onclick="window.renderView('central')">
                     <div class="stat-val">---</div>
                     <div class="stat-label">Stock Faible</div>
+                </div>
                 ${currentUser.role !== 'manager' ? `
                 <div class="stat-card sc-blue" onclick="window.renderView('reports')">
                     <div class="stat-val">${Object.keys(state.pharmacies).length}</div>
@@ -2849,6 +2854,19 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         expiry: s.medicines?.expiry_date || '-'
     }));
 
+    // Fetch counts and history
+    const [dispTotal, lowStockTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}] = await Promise.all([
+        _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId),
+        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).lt('qty', 50),
+        fetchTableData('dispensations', { 
+            page: pagination.dispensations.currentPage, 
+            pageSize: pagination.dispensations.pageSize, 
+            filters: { pharmacy_id: pharmId },
+            order: { col: 'date', ascending: false }
+        }),
+        _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(200)
+    ]);
+
     const dashboardHeaderHtml = `
         <div class="page-header" style="justify-content: flex-end; gap: 10px;">
             ${isFullAdmin ? `
@@ -2874,12 +2892,12 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     <strong>${currentLang === 'ar' ? 'إجمالي الأصناف' : 'Total Articles'}</strong>
                 </div>
             </div>
-            <div class="stat-card sc-purple">
-                <div class="stat-val">---</div>
+            <div class="stat-card sc-purple" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')">
+                <div class="stat-val">${dispTotal.count || 0}</div>
                 <div class="stat-label">Délivrances</div>
             </div>
             <div class="stat-card sc-red">
-                <div class="stat-val">---</div>
+                <div class="stat-val">${lowStockTotal.count || 0}</div>
                 <div class="stat-label">Stock Faible</div>
             </div>
         </div>
@@ -2905,7 +2923,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     </table>
                 </div>
                 <datalist id="central-meds-list-${pharmId}">
-                    ${state.medicines.filter(m => !isExpired(m.expiry)).map(m => `<option value="${m.name}"></option>`).join('')}
+                    ${recentMeds.map(m => `<option value="${m.name}"></option>`).join('')}
                 </datalist>
 
                 <div style="display:flex; justify-content: space-between; align-items: center;">
@@ -2948,7 +2966,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     </table>
                 </div>
                 <datalist id="disp-meds-list-${pharmId}">
-                    ${p.stock.filter(m => m.qty > 0 && !isExpired(m.expiry)).map(m => `<option value="${m.name} [${m.batch}] (Stock: ${m.qty})" data-id="${m.id}"></option>`).join('')}
+                    ${currentStock.filter(m => m.qty > 0 && !isExpired(m.expiry)).map(m => `<option value="${m.name} [${m.batch}] (Stock: ${m.qty})" data-id="${m.id}"></option>`).join('')}
                 </datalist>
 
                 <div style="display:flex; justify-content: space-between; align-items: center;">
@@ -2987,7 +3005,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                             </tr>
                         </thead>
                         <tbody>
-                            ${p.stock.map(m => `
+                            ${currentStock.map(m => `
                                 <tr>
                                     ${isFullAdmin ? `<td><input type="checkbox" class="pharm-stock-checkbox-${pharmId}" value="${m.id}"></td>` : ''}
                                     <td><strong>${m.name}</strong></td>
@@ -3008,6 +3026,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                         </tbody>
                     </table>
                 </div>
+                ${renderPaginationControls('pharmacy_stock', stockTotal)}
             </div>
             <div class="dash-col shadow-sm" style="flex: 2;">
                 <div class="block-title">${t('history_dispense')}</div>
@@ -3017,19 +3036,20 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                             <tr><th>Réf.</th><th>${t('th_date')}</th><th>${t('th_patient')}</th><th>${t('th_med')}</th><th>${t('th_qty')}</th><th>${t('th_worker')}</th></tr>
                         </thead>
                         <tbody>
-                            ${state.dispensations.filter(d => d.pharmacyId == pharmId).slice().reverse().map(d => `
+                            ${dispHistory.map(d => `
                                 <tr>
                                     <td><small><strong>${d.reference || '-'}</strong></small></td>
                                     <td>${formatDate(d.date)}</td>
-                                    <td>${d.patientName}</td>
-                                    <td><strong>${d.medName}</strong></td>
+                                    <td>${d.patient_name || '-'}</td>
+                                    <td><strong>${d.medicine_name}</strong></td>
                                     <td><span class="status-badge warning">-${d.qty}</span></td>
-                                    <td>${typeof d.dispensedBy === 'object' ? d.dispensedBy[currentLang] : (d.dispensedBy || '-')}</td>
+                                    <td>${window.parseWorkerName(d.dispensed_by, currentLang)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
                     </table>
                 </div>
+                ${renderPaginationControls('dispensations', historyTotal)}
             </div>
         </div>
     `;
@@ -3122,7 +3142,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             let valid = true;
 
             // FEFO: Maintain local tracking for this dispensing session
-            const localPStock = p.stock.map(m => ({ ...m }));
+            const localPStock = currentStock.map(m => ({ ...m }));
 
             for (const row of rows) {
                 const searchVal = row.querySelector('.row-med-disp-search').value;
