@@ -404,7 +404,15 @@ async function fetchTableData(table, { page = 1, pageSize = 25, search = '', sea
     let query = _supabase.from(table).select(select, { count: 'exact' });
 
     if (search) {
-        query = query.ilike(searchCol, `%${search}%`);
+        if (table === 'medicines') {
+            // Search in both name and batch for medicines
+            query = query.or(`name.ilike.%${search}%,batch.ilike.%${search}%`);
+        } else if (table === 'patients') {
+            // Search in both name and national ID for patients
+            query = query.or(`name.ilike.%${search}%,national_id.ilike.%${search}%`);
+        } else {
+            query = query.ilike(searchCol, `%${search}%`);
+        }
     }
 
     Object.entries(filters).forEach(([col, val]) => {
@@ -1641,10 +1649,10 @@ window.renderView = async function(viewName) {
         
         // Scalability: Fetch a sample of active medicines for the datalist
         const { data: activeMeds } = await _supabase.from('medicines')
-            .select('name, batch, qty, expiry_date')
+            .select('id, name, batch, qty, expiry_date')
             .gt('qty', 0)
             .order('name', { ascending: true })
-            .limit(200);
+            .limit(2000);
         
         content = `
             ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) ? `
@@ -1676,7 +1684,7 @@ window.renderView = async function(viewName) {
                         </table>
                     </div>
                     <datalist id="distribution-meds-list">
-                        ${activeMeds.map(m => `<option value="${m.name} (Lot: ${m.batch} | Stock: ${m.qty})" data-id="${m.id}"></option>`).join('')}
+                        ${activeMeds.map(m => `<option value="${m.name} [Lot: ${m.batch}] (Stock: ${m.qty})" data-id="${m.id}"></option>`).join('')}
                     </datalist>
                     
                     <div style="display:flex; justify-content: space-between; align-items: center;">
