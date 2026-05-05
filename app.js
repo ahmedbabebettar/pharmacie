@@ -105,6 +105,15 @@ window.formatDate = function(dateStr) {
     return dateStr;
 };
 
+// Utility: Debounce
+window.debounce = function(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+};
+
 // Logic for finding the Wednesday that ends the week of a given date
 function getWeekEndWednesday(dateStr) {
     const d = new Date(dateStr);
@@ -2951,7 +2960,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }));
 
     // Fetch counts and history
-    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: searchableStockData}] = await Promise.all([
+    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}, {data: searchableStockData}] = await Promise.all([
         _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).lt('qty', 50),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', pharmId).filter('medicine_id', 'in', 
@@ -2964,6 +2973,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             order: { col: 'date', ascending: false }
         }),
         _supabase.from('medicines').select('name').order('name', { ascending: true }).limit(1000),
+        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(100),
         _supabase.from('pharmacy_stock').select('qty, medicines(id, name, batch, expiry_date)').eq('pharmacy_id', pharmId).gt('qty', 0).limit(2000)
     ]);
 
@@ -3056,7 +3066,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     <label style="display:block; margin-bottom:8px; font-weight:800;">1. Choisir le Patient</label>
                     <input type="text" id="disp-patient-${pharmId}" list="patients-list" required placeholder="${t('patient_name')}" autocomplete="off" style="max-width: 400px; border: 2px solid var(--primary-brand);">
                     <datalist id="patients-list">
-                        <!-- Dynamically populated via search -->
+                        ${(recentPats || []).map(pat => `<option value="${pat.name} (${pat.national_id || '-'})"></option>`).join('')}
                     </datalist>
                 </div>
 
