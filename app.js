@@ -580,6 +580,7 @@ async function loadDataFromSupabase() {
         const { data: pendingOrds } = await _supabase.from('orders').select('*');
         state.orders = pendingOrds || [];
 
+        window.updateSidebarPharmacies();
         window.updateSyncStatus('success');
     } catch (err) {
         console.error("Supabase Load Error:", err);
