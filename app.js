@@ -3613,6 +3613,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             }
         });
     }
+    }
     
     // Order Form Submittal (Bon de Commande)
     window.addOrderRow = function(id) {
@@ -3676,7 +3677,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             // Ensure pharmId is always valid
             const safePharmId = pharmId || (currentUser && currentUser.pharmacyId);
             if (!safePharmId) {
-                await window.showCustomDialog({ title: "Erreur", msg: "Impossible d'identifier la pharmacie. Veuillez vous reconnecter.", icon: "fa-circle-xclamation" });
+                await window.showCustomDialog({ title: 'Erreur', msg: 'Impossible d''identifier la pharmacie. Veuillez vous reconnecter.', icon: 'fa-circle-xclamation' });
                 return;
             }
 
@@ -3718,7 +3719,7 @@ window.openDistForPharmacy = function(pharmId) {
     window.renderView('distribution');
 };
 
-window.openPatientModal = function(id = null) {
+window.openPatientModal = async function(id = null) {
     const modal = document.getElementById('patient-modal');
     const form = document.getElementById('patient-form');
     const title = document.getElementById('patient-modal-title');
@@ -3727,14 +3728,17 @@ window.openPatientModal = function(id = null) {
     document.getElementById('patient-id').value = id || '';
     
     if(id) {
-        const p = state.patients.find(pt => pt.id === id);
-        if(p) {
-            title.innerText = currentLang === 'ar' ? 'تعديل مريض' : 'Modifier le Patient';
-            document.getElementById('patient-name-input').value = p.name;
-            document.getElementById('patient-nid-input').value = p.nationalId || '';
+        title.innerText = currentLang === 'ar' ? 'تعديل مريض' : 'Modifier le Patient';
+        window.updateSyncStatus('syncing');
+        try {
+            const { data: p } = await _supabase.from('patients').select('*').eq('id', id).single();
+            if(!p) return;
+            document.getElementById('patient-name-input').value = p.name || '';
+            document.getElementById('patient-nid-input').value = p.national_id || '';
             document.getElementById('patient-phone-input').value = p.phone || '';
             document.getElementById('patient-hospital-input').value = p.hospital || '';
-        }
+            window.updateSyncStatus('success');
+        } catch(e) { window.updateSyncStatus('error'); }
     } else {
         title.innerText = currentLang === 'ar' ? 'إضافة مريض جديد' : 'Ajouter un Patient';
     }
@@ -3810,15 +3814,18 @@ window.deleteMedicine = async function(id) {
     }
 };
 
-window.editMedicine = function(id) {
-    const med = state.medicines.find(m => m.id === id);
+window.editMedicine = async function(id) {
+    const { data: med } = await _supabase.from('medicines').select('*').eq('id', id).single();
     if(!med) return;
+
     document.getElementById('med-name').value = med.name;
     document.getElementById('med-batch').value = med.batch;
     document.getElementById('med-qty').value = med.qty;
-    document.getElementById('med-entry').value = med.entryDate;
-    document.getElementById('med-expiry').value = med.expiry;
-    document.getElementById('med-price').value = med.price || '';
+    document.getElementById('med-entry').value = (med.entry_date || '').split('T')[0];
+
+    document.getElementById('med-expiry').value = (med.expiry_date || '').split('T')[0];
+
+    document.getElementById('med-price').value = med.price || 0;
     
     document.getElementById('add-medicine-form').dataset.editId = id;
     document.getElementById('add-medicine-modal').classList.add('active');
