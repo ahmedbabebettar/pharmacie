@@ -3215,29 +3215,102 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         </div>
     `;
 
+    // --- PREMIUM MODERN STOCK VIEW ---
+    const sRows = currentStock.map(m => {
+        const isExp = isExpired(m.expiry);
+        const isLow = m.qty < 50;
+        return `
+            <tr class="${isExp ? 'expired-row' : ''}">
+                <td style="padding: 16px;">
+                    <div style="font-weight:700; color:var(--primary-brand); font-size:1.05rem;">${m.name}</div>
+                    <div style="font-size:0.8rem; color:#64748b; margin-top:2px;">Réf: ${m.id}</div>
+                </td>
+                <td><span class="badge-soft" style="background:#f1f5f9; color:#475569; padding:4px 10px; border-radius:6px; font-weight:600;">${m.batch}</span></td>
+                <td style="${isExp ? 'color:var(--danger-red); font-weight:700;' : ''}">${formatDate(m.expiry)}</td>
+                <td>
+                    <span class="status-badge ${isLow ? 'warning' : 'good'}" style="font-size:1rem; padding:6px 16px; min-width:60px; text-align:center;">
+                        ${m.qty}
+                    </span>
+                </td>
+                <td style="text-align:right; padding:16px;">
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button class="icon-btn edit-btn" title="Délivrer" onclick="window.renderPharmacy(${pharmId}, 'pharm-dispense')" style="background:var(--primary-brand); color:white; width:36px; height:36px;">
+                            <i class="fa-solid fa-hand-holding-medical"></i>
+                        </button>
+                        <button class="icon-btn" title="${t('btn_return')}" onclick="window.returnToCentral(${pharmId}, ${m.id})" style="background:#f1f5f9; color:#64748b; width:36px; height:36px;">
+                            <i class="fa-solid fa-rotate-left"></i>
+                        </button>
+                        ${isFullAdmin ? `
+                        <button class="icon-btn delete-btn" title="Supprimer" onclick="window.deleteFromPharmacyStock(${pharmId}, ${m.id})" style="width:36px; height:36px;">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                        ` : ''}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    const modernStockHtml = `
+        <div class="transfer-card animated fadeIn" style="border-top: 5px solid var(--accent-green); box-shadow: var(--shadow-lg);">
+            <div class="block-title" style="color:var(--accent-green); display:flex; justify-content:space-between; align-items:center; padding: 20px 25px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="width:40px; height:40px; background:rgba(16, 185, 129, 0.1); border-radius:10px; display:flex; align-items:center; justify-content:center;">
+                        <i class="fa-solid fa-boxes-stacked" style="font-size:1.2rem;"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:1.2rem; font-weight:800;">${currentLang==='ar'?'المخزون الحالي':'Stock de la Pharmacie'}</div>
+                        <div style="font-size:0.85rem; color:#94a3b8; font-weight:400;">${stockTotal} ${currentLang==='ar'?'دواء مسجل':'articles enregistrés'}</div>
+                    </div>
+                </div>
+                <div class="search-box" style="margin:0; width:350px; background:#f8fafc;">
+                    <i class="fa-solid fa-search"></i>
+                    <input type="text" id="search-pharm-stock-main" placeholder="${t('search_placeholder')}" value="${pStockState.search || ''}" style="background:transparent; border:none;">
+                </div>
+            </div>
+            <div class="table-container shadow-sm" style="border-radius:0; border:none; border-top: 1px solid #f1f5f9;">
+                <table style="width:100%; border-collapse: separate; border-spacing: 0;">
+                    <thead>
+                        <tr style="background:#f8fafc;">
+                            <th style="padding:15px 25px;">Médicament</th>
+                            <th style="padding:15px;">Lot</th>
+                            <th style="padding:15px;">Expiration</th>
+                            <th style="padding:15px;">Quantité</th>
+                            <th style="text-align:right; padding:15px 25px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sRows || `<tr><td colspan="5" style="text-align:center; padding:80px; color:#94a3b8;"><i class="fa-solid fa-box-open" style="font-size:3rem; display:block; margin-bottom:15px; opacity:0.3;"></i> Aucun médicament trouvé dans cette pharmacie.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+            <div style="padding:15px 25px; border-top: 1px solid #f1f5f9; background:#f8fafc; border-radius:0 0 12px 12px;">
+                ${renderPaginationControls(pStateKey)}
+            </div>
+        </div>
+    `;
+
     let finalBody = '';
     if (subView === 'history') {
-        const hRows = dispHistory.map(d => `
-            <tr>
-                <td><strong>PR-${d.reference || '-'}</strong></td>
-                <td>${formatDate(d.date)}</td>
-                <td>${d.patient_name}</td>
-                <td><strong>${d.medicine_name}</strong></td>
-                <td><span class="status-badge warning">-${d.qty}</span></td>
-                <td>${window.parseWorkerName(d.dispensed_by, currentLang)}</td>
-            </tr>
-        `).join('');
-
         finalBody = `
-            <div class="transfer-card animated fadeIn">
-                <div class="block-title" style="color:var(--primary-brand);"><i class="fa-solid fa-clock-rotate-left"></i> Historique des Délivrances</div>
+            <div class="transfer-card animated fadeIn" style="border-top: 5px solid var(--primary-brand);">
+                <div class="block-title" style="color:var(--primary-brand);"><i class="fa-solid fa-clock-rotate-left"></i> Historique Global des Délivrances</div>
                 <div class="table-container shadow-sm">
                     <table>
                         <thead>
                             <tr><th>Réf.</th><th>Date</th><th>Patient</th><th>Médicament</th><th>Quant.</th><th>Responsable</th></tr>
                         </thead>
                         <tbody>
-                            ${hRows || `<tr><td colspan="6" style="text-align:center; padding:30px; color:#94a3b8;">Aucun historique.</td></tr>`}
+                            ${dispHistory.map(d => `
+                                <tr>
+                                    <td><strong>PR-${d.reference || '-'}</strong></td>
+                                    <td>${formatDate(d.date)}</td>
+                                    <td>${d.patient_name}</td>
+                                    <td><strong>${d.medicine_name}</strong></td>
+                                    <td><span class="status-badge warning">-${d.qty}</span></td>
+                                    <td>${window.parseWorkerName(d.dispensed_by, currentLang)}</td>
+                                </tr>
+                            `).join('') || `<tr><td colspan="6" style="text-align:center; padding:30px;">Aucun historique.</td></tr>`}
                         </tbody>
                     </table>
                 </div>
@@ -3251,7 +3324,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     } else if (subView === 'pharm-order') {
         finalBody = orderHtml;
     } else {
-        finalBody = stockHistoryHtml;
+        finalBody = modernStockHtml;
     }
 
     viewContainer.innerHTML = dashboardHeaderHtml + tabsHtml + finalBody;
@@ -3275,10 +3348,19 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         }, 300));
     }
 
-    // Handle Stock Search
-    const stockSearch = document.getElementById(`search-pharm-stock-${pharmId}`);
-    if(stockSearch) {
-        stockSearch.addEventListener('input', (e) => {
+    // Handle Stock Search (Isolated and Main)
+    const stockSearchMain = document.getElementById('search-pharm-stock-main');
+    if(stockSearchMain) {
+        stockSearchMain.addEventListener('input', (e) => {
+            pStockState.search = e.target.value;
+            pStockState.currentPage = 1;
+            debounceSearch(() => window.renderPharmacy(pharmId, subView), 500);
+        });
+    }
+
+    const stockSearchInline = document.getElementById(`search-pharm-stock-${pharmId}`);
+    if(stockSearchInline) {
+        stockSearchInline.addEventListener('input', (e) => {
             pStockState.search = e.target.value;
             pStockState.currentPage = 1;
             debounceSearch(() => window.renderPharmacy(pharmId, subView), 500);
