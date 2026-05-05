@@ -4318,6 +4318,7 @@ window.handleUserSubmit = async function(e) {
         window.updateSyncStatus('error');
         window.showCustomDialog({ title: "Erreur", msg: err.message || "Erreur de sauvegarde", icon: "fa-circle-xclamation" });
     }
+};
 
 window.migrateUsersToCloud = async function() {
     const defaultUsersList = [
