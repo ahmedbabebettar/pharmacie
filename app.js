@@ -519,13 +519,15 @@ async function loadDataFromSupabase() {
         // Map Pharmacies
         if (pharms.data) {
             pharms.data.forEach(p => {
+                const existing = state.pharmacies[p.id] || {};
                 state.pharmacies[p.id] = {
-                    ...(state.pharmacies[p.id] || {}),
+                    ...existing,
                     id: p.id,
                     name: { ar: p.name_ar || '', fr: p.name_fr || '' },
                     color: p.color || '#047857',
-                    patients: 0,
-                    stock: []
+                    // Preserve patients and stock if they already exist to avoid UI flicker/disappearance
+                    patients: existing.patients || 0,
+                    stock: existing.stock || []
                 };
             });
         }
@@ -637,15 +639,35 @@ window.importPharmacyStock = async function(event, pharmId) {
             
             if (rawRows.length === 0) { window.showToast("Fichier vide.", "error"); return; }
             
-            let nameIdx = 0, batchIdx = 1, qtyIdx = 2, expIdx = 3, startIndex = 0, headerFound = false;
+            let nameIdx = -1, batchIdx = -1, qtyIdx = -1, expIdx = -1, startIndex = 0, headerFound = false;
             const firstRow = rawRows[0];
             for (let i = 0; i < firstRow.length; i++) {
                 let v = String(firstRow[i] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                if (v.includes('med') || v.includes('nom') || v.includes('name') || v.includes('article') || v.includes('designation') || v.includes('اسم') || v.includes('دواء')) { nameIdx = i; headerFound = true; }
-                else if (v.includes('lot') || v.includes('batch') || v.includes('tashgil') || v.includes('تشغيل') || v.includes('لوت')) { batchIdx = i; headerFound = true; }
-                else if (v.includes('qty') || v.includes('qte') || v.includes('quant') || v.includes('stock') || v.includes('كمية')) { qtyIdx = i; headerFound = true; }
-                else if (v.includes('exp') || v.includes('perem') || v.includes('انتهاء') || v.includes('صلاحية')) { expIdx = i; headerFound = true; }
+                
+                // Precise mapping to avoid "Stock Central" being picked as "Qty"
+                if (v.includes('nom') || v.includes('name') || v.includes('article') || v.includes('designation') || v.includes('اسم') || v.includes('دواء')) { 
+                    if (nameIdx === -1) nameIdx = i; 
+                    headerFound = true; 
+                }
+                else if (v.includes('lot') || v.includes('batch') || v.includes('tashgil') || v.includes('تشغيل') || v.includes('لوت')) { 
+                    if (batchIdx === -1) batchIdx = i; 
+                    headerFound = true; 
+                }
+                else if (v === 'qty' || v === 'qte' || v === 'quantite' || v.includes('quant') || v.includes('كمية') || (v.includes('stock') && !v.includes('central'))) { 
+                    // Prioritize exact matches or specific keywords
+                    if (qtyIdx === -1 || v === 'qty' || v === 'quantite' || v === 'كمية') qtyIdx = i; 
+                    headerFound = true; 
+                }
+                else if (v.includes('exp') || v.includes('perem') || v.includes('انتهاء') || v.includes('صلاحية')) { 
+                    if (expIdx === -1) expIdx = i; 
+                    headerFound = true; 
+                }
             }
+            // Fallback for indexes if not found by name
+            if (nameIdx === -1) nameIdx = 0;
+            if (batchIdx === -1) batchIdx = 1;
+            if (qtyIdx === -1) qtyIdx = 2;
+            if (expIdx === -1) expIdx = 3;
             if (headerFound) startIndex = 1;
 
             for (let i = startIndex; i < rawRows.length; i++) {
