@@ -670,9 +670,10 @@ window.importPharmacyStock = async function(event, pharmId) {
                 });
             }
 
-            // Step 2: Clear and Update Stock
-            await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId);
-
+            // Step 2: Update Stock (Additive / Merge)
+            // CRITICAL FIX: We NO LONGER delete all stock before import.
+            // This preserves distributions from Central Stock that might not be in the Excel file.
+            
             const stockUpserts = processedRows.map(row => {
                 const key = `${row.name.toLowerCase()}|${row.batch.toLowerCase()}`;
                 const medId = medMap[key];
