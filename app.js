@@ -534,6 +534,24 @@ async function loadDataFromSupabase() {
             });
         }
 
+        // SCALABILITY: Fetch pharmacy activity stats (patient counts and percentages)
+        const { data: activityData } = await _supabase.rpc('get_pharmacy_stats');
+        // If RPC is missing, fallback to count query
+        if (!activityData) {
+            for (const id in state.pharmacies) {
+                const { count } = await _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', id);
+                state.pharmacies[id].patients = count || 0;
+                state.pharmacies[id].percent = Math.min(100, Math.floor((count || 0) / 10)); // Example 10 as target
+            }
+        } else {
+            activityData.forEach(row => {
+                if (state.pharmacies[row.pharmacy_id]) {
+                    state.pharmacies[row.pharmacy_id].patients = row.patient_count;
+                    state.pharmacies[row.pharmacy_id].percent = Math.min(100, Math.floor(row.activity_percent));
+                }
+            });
+        }
+
         // Map Pending Returns
         state.pendingReturns = returns.data || [];
 
