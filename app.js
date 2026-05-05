@@ -3308,7 +3308,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             let valid = true;
 
             // FEFO: Maintain local tracking for this dispensing session
-            const localPStock = currentStock.map(m => ({ ...m }));
+            const localPStock = searchableStock.map(m => ({ ...m }));
 
             for (const row of rows) {
                 const searchVal = row.querySelector('.row-med-disp-search').value;
