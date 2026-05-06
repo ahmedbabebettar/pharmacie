@@ -663,7 +663,7 @@ window.optimisticUpdate = function(action, payload = {}) {
     
     window.updateSidebarPharmacies();
     // Refresh dashboard instantly if active
-    if (document.querySelector('.tab-btn[onclick="window.renderView(\\'dashboard\\')"]')?.classList.contains('active')) {
+    if (typeof activeView !== 'undefined' && activeView === 'dashboard') {
         window.renderView('dashboard');
     }
 };
