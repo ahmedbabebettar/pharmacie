@@ -3639,35 +3639,67 @@ window.deletePatient = async function(id) {
 document.addEventListener('DOMContentLoaded', () => {
     const pForm = document.getElementById('patient-form');
     if(pForm) {
-        pForm.addEventListener('submit', async (e) => {
+        pForm.onsubmit = async (e) => {
             e.preventDefault();
             const id = document.getElementById('patient-id').value;
-            const name = document.getElementById('patient-name-input').value;
-            const nid = document.getElementById('patient-nid-input').value;
-            const phone = document.getElementById('patient-phone-input').value;
-            const hospital = document.getElementById('patient-hospital-input').value;
+            const name = document.getElementById('patient-name-input').value.trim();
+            const nid = document.getElementById('patient-nid-input').value.trim();
+            const phone = document.getElementById('patient-phone-input').value.trim();
+            const hospital = document.getElementById('patient-hospital-input').value.trim();
             
+            if (!name) {
+                window.showToast("Le nom est obligatoire", "error");
+                return;
+            }
+
             window.showToast("Enregistrement...", "info");
             
-            const payload = { name, national_id: nid, phone, hospital };
-            
             try {
+                // Duplicate check ONLY for NEW patients
+                if (!id) {
+                    // Check by National ID if provided
+                    if (nid) {
+                        const { data: existingNID } = await _supabase.from('patients').select('id').eq('national_id', nid).maybeSingle();
+                        if (existingNID) {
+                            await window.showCustomDialog({ 
+                                title: currentLang === 'ar' ? 'تنبيه: المريض موجود' : "Patient déjà existant", 
+                                msg: currentLang === 'ar' ? `هذا الرقم الوطني (${nid}) مسجل مسبقاً لمريض آخر.` : `Ce NNIR (${nid}) est déjà enregistré pour un autre patient.`, 
+                                icon: 'fa-user-tag' 
+                            });
+                            return;
+                        }
+                    } else {
+                        // Check by Name if NID is not provided (to avoid exact name duplicates)
+                        const { data: existingName } = await _supabase.from('patients').select('id').eq('name', name).maybeSingle();
+                        if (existingName) {
+                            const confirmDuplicate = await window.showCustomDialog({
+                                title: currentLang === 'ar' ? 'تأكيد الاسم المكرر' : "Nom identique détecté",
+                                msg: currentLang === 'ar' ? `يوجد مريض بنفس الاسم بالضبط. هل تريد الاستمرار في إضافة مريض جديد؟` : `Un patient avec exactement le même nom existe déjà. Voulez-vous continuer ?`,
+                                type: 'confirm',
+                                icon: 'fa-user-group'
+                            });
+                            if (!confirmDuplicate) return;
+                        }
+                    }
+                }
+
+                const payload = { name, national_id: nid, phone, hospital };
+                
                 if(id) {
                     await _supabase.from('patients').update(payload).eq('id', id);
                 } else {
-                    // Get next ID if needed, but BIGSERIAL handles it
                     await _supabase.from('patients').insert([payload]);
                 }
                 
                 await loadDataFromSupabase();
                 document.getElementById('patient-modal').classList.remove('active');
                 window.renderView('patients');
-                window.showToast("Patient enregistré !");
+                window.showToast(currentLang === 'ar' ? "تم حفظ بيانات المريض بنجاح" : "Patient enregistré !");
             } catch (err) {
                 console.error(err);
                 window.showToast("Erreur lors de l'enregistrement", "error");
             }
-        });
+        };
     }
 });
 
