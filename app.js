@@ -2946,6 +2946,16 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         .eq('pharmacy_id', pharmId);
     
     if (stockErr) throw stockErr;
+    
+    // Update local p.stock cache to support other functions (returns, etc)
+    p.stock = (allStockData || []).filter(ps => ps.medicines != null).map(ps => ({
+        id: ps.medicines.id,
+        name: ps.medicines.name,
+        batch: ps.medicines.batch,
+        qty: ps.qty,
+        expiry: ps.medicines.expiry_date,
+        ps_id: ps.id
+    }));
 
     // 2. Filter out orphans and apply search locally
     let filteredStock = (allStockData || []).filter(ps => ps.medicines != null);
@@ -3062,7 +3072,20 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             <div class="block-title" style="color:var(--accent-green); display:flex; justify-content:space-between; align-items:center; padding: 20px 25px;">
                 <div>
                     <div style="font-size:1.2rem; font-weight:800;">Stock de la Pharmacie</div>
-                    <div style="font-size:0.85rem; color:#94a3b8;">${pStockState.total} articles affichés</div>
+                    <div style="font-size:0.85rem; color:#94a3b8; display:flex; align-items:center; gap:10px;">
+                        <span>${pStockState.total} articles affichés</span>
+                        <button class="icon-btn" style="color:var(--primary-brand); font-size:14px;" onclick="window.renderPharmacy(${pharmId}, 'all')" title="Actualiser">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                        ${isFullAdmin ? `
+                        <button class="icon-btn" style="color:#7c3aed; font-size:14px;" onclick="window.consolidatePharmacyStock(${pharmId})" title="Consolider ودمج المكررات">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        </button>` : ''}
+                        ${isFullAdmin && pharmId == 4 ? `
+                        <button class="icon-btn" style="color:#2563eb; font-size:14px;" onclick="window.restoreHospitalNationalStock()" title="Restaurer depuis l'image 🖼️">
+                            <i class="fa-solid fa-image"></i>
+                        </button>` : ''}
+                    </div>
                 </div>
                 <div class="search-box" style="margin:0; width:300px; background:#f8fafc;">
                     <i class="fa-solid fa-search"></i>
@@ -3240,7 +3263,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
     const dispForm = document.getElementById(`bulk-dispense-form-${pharmId}`);
     if(dispForm) {
-        dispForm.addEventListener('submit', async (e) => {
+        dispForm.onsubmit = async (e) => {
             e.preventDefault();
             const patientInput = document.getElementById(`disp-patient-${pharmId}`).value.trim();
             
@@ -3431,25 +3454,56 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 const { error: dispErr } = await _supabase.from('dispensations').insert(dispensationRecords);
                 if (dispErr) throw dispErr;
 
-                // 2. Bulk upsert pharmacy stock (calculate new qty from local p.stock cache)
-                const stockUpdates = items.map(item => {
-                    const med = p.stock.find(m => m.id === item.medId);
+                // 2. NUCLEAR DATA INTEGRITY FIX: Unique Consolidation
+                const decrements = {};
+                items.forEach(it => {
+                    decrements[it.medId] = (decrements[it.medId] || 0) + it.qty;
+                });
+                const uniqueMedIds = Object.keys(decrements).map(id => parseInt(id));
+
+                const { data: allFreshRows, error: freshErr } = await _supabase.from('pharmacy_stock')
+                    .select('id, medicine_id, qty')
+                    .eq('pharmacy_id', pharmId)
+                    .in('medicine_id', uniqueMedIds);
+                
+                if (freshErr) throw freshErr;
+
+                const totalsMap = {};
+                (allFreshRows || []).forEach(s => {
+                    totalsMap[s.medicine_id] = (totalsMap[s.medicine_id] || 0) + s.qty;
+                });
+
+                // --- CONSOLIDATION SUCCESSFUL ---
+
+                const stockInserts = uniqueMedIds.map(medId => {
+                    const currentTotal = totalsMap[medId] || 0;
+                    const totalToDispense = decrements[medId];
                     return {
                         pharmacy_id: pharmId,
-                        medicine_id: item.medId,
-                        qty: Math.max(0, (med ? med.qty : 0) - item.qty)
+                        medicine_id: medId,
+                        qty: Math.max(0, currentTotal - totalToDispense)
                     };
                 });
-                const { error: stockErr } = await _supabase
-                    .from('pharmacy_stock')
-                    .upsert(stockUpdates, { onConflict: 'pharmacy_id,medicine_id' });
-                if (stockErr) throw stockErr;
 
-                // 3. Update local pharmacy stock state (no full reload needed)
-                items.forEach(item => {
-                    const med = p.stock.find(m => m.id === item.medId);
-                    if (med) med.qty = Math.max(0, med.qty - item.qty);
-                });
+                // Delete all old rows for these medicines
+                const idsToDelete = (allFreshRows || []).map(r => r.id);
+                if (idsToDelete.length > 0) {
+                    const { error: delErr } = await _supabase.from('pharmacy_stock').delete().in('id', idsToDelete);
+                    if (delErr) throw delErr;
+                }
+
+                // Insert ONE clean row per medicine
+                const { error: insErr } = await _supabase.from('pharmacy_stock').insert(stockInserts);
+                if (insErr) throw insErr;
+
+                // 3. Update local cache (if it exists) to keep UI in sync without full reload
+                if (p && p.stock) {
+                    items.forEach(item => {
+                        const med = p.stock.find(m => m.id === item.medId);
+                        if (med) med.qty = Math.max(0, med.qty - item.qty);
+                    });
+                }
+
 
                 await window.showCustomDialog({ title: "Succès", msg: t('alert_success'), icon: "fa-circle-check" });
                 await window.autoDownloadReceipt('DELIVRANCE', patientName, items, barcode);
@@ -3855,10 +3909,6 @@ window.deleteSelectedPatients = async function() {
 
 window.toggleAllPharmacyStock = function(source, pharmId) {
     document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}`).forEach(cb => cb.checked = source.checked);
-};
-
-window.toggleAllPharmacyStock = function(master, pharmId) {
-    document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}`).forEach(cb => cb.checked = master.checked);
 };
 
 window.deleteSelectedPharmacyStock = async function(pharmId) {
@@ -4768,5 +4818,174 @@ window.repairOrphan = async function(oldId) {
     } catch (err) {
         console.error(err);
         window.showToast("حدث خطأ أثناء الإصلاح", "error");
+    }
+};
+
+window.consolidatePharmacyStock = async function(pharmId) {
+    const confirm = await window.showCustomDialog({
+        title: currentLang === 'ar' ? "دمج مخزون الصيدلية" : "Consolider Stock Pharmacie",
+        msg: currentLang === 'ar' ? "هل تريد دمج الأدوية المكررة في هذه الصيدلية؟ سيتم جمع الكميات." : "Voulez-vous fusionner les doublons dans cette pharmacie ? Les quantités seront cumulées.",
+        type: 'confirm',
+        icon: 'fa-wand-magic-sparkles'
+    });
+    if(!confirm) return;
+
+    window.showToast("Consolidation...", "info");
+    try {
+        const { data: allItems } = await _supabase.from('pharmacy_stock').select('*').eq('pharmacy_id', pharmId);
+        if(!allItems || allItems.length === 0) return;
+
+        const map = {};
+        const toDelete = [];
+        const toUpdate = [];
+
+        allItems.forEach(item => {
+            const key = item.medicine_id;
+            if(!map[key]) {
+                map[key] = { ...item };
+            } else {
+                map[key].qty += item.qty;
+                toDelete.push(item.id);
+                if(!toUpdate.find(u => u.id === map[key].id)) {
+                    toUpdate.push(map[key]);
+                }
+            }
+        });
+
+        if(toUpdate.length > 0) {
+            for(const item of toUpdate) {
+                await _supabase.from('pharmacy_stock').update({ qty: item.qty }).eq('id', item.id);
+            }
+        }
+        if(toDelete.length > 0) {
+            await _supabase.from('pharmacy_stock').delete().in('id', toDelete);
+        }
+
+        window.showToast("Terminé !");
+        window.renderPharmacy(pharmId);
+    } catch(err) {
+        console.error(err);
+        window.showToast("Erreur", "error");
+    }
+};
+
+
+window.restoreHospitalNationalStock = async function() {
+    const confirm = await window.showCustomDialog({
+        title: "Restaurer le stock",
+        msg: "Voulez-vous restaurer les 61 articles de l'image pour l'Hôpital National ?",
+        type: 'confirm',
+        icon: 'fa-image'
+    });
+    if(!confirm) return;
+
+    window.showToast("Restauration en cours...", "info");
+    const pharmId = 4;
+    const rows = [
+        { name: "Asfal Cp B25", batch: "Ej24701", expiry: "2029-08-01", qty: 42 },
+        { name: "Aerius 5", batch: "C131684", expiry: "2027-05-01", qty: 41 },
+        { name: "amcard 10mg", batch: "AM010152", expiry: "2026-06-01", qty: 57 },
+        { name: "Amlodipine 5 B/30", batch: "3900901", expiry: "2027-10-01", qty: 75 },
+        { name: "Ansemide( furosemide ) 500mg/200UI B/50", batch: "5080", expiry: "2030-05-01", qty: 45 },
+        { name: "Anzitar (Atorvastatine) 40mg B/30", batch: "5L04346", expiry: "2027-11-01", qty: 36 },
+        { name: "Apravell 300mg cp", batch: "EA6083", expiry: "2026-12-01", qty: 5 },
+        { name: "Apravell 300mg cp", batch: "2401230001", expiry: "2027-06-01", qty: 40 },
+        { name: "Arpegic 100", batch: "25E003", expiry: "2027-05-01", qty: 61 },
+        { name: "Atarax 25mg", batch: "2502526", expiry: "2027-01-01", qty: 78 },
+        { name: "Atarvastatine 20", batch: "3205516", expiry: "2027-04-01", qty: 6 },
+        { name: "Atarvastatine 20", batch: "4L01187", expiry: "2026-09-01", qty: 54 },
+        { name: "Avlocardyl 40mg", batch: "24E006", expiry: "2027-05-01", qty: 19 },
+        { name: "Birashof 5mg B/30", batch: "SW50401", expiry: "2027-11-01", qty: 16 },
+        { name: "bisacor 5mg B/30", batch: "5K00384", expiry: "2028-08-01", qty: 78 },
+        { name: "bisoprolol 10mg B/30", batch: "G02EKX", expiry: "2027-07-01", qty: 40 },
+        { name: "bisoprolol 2.5mg B28", batch: "A20J1", expiry: "2028-02-01", qty: 70 },
+        { name: "Calcidia 1.54 B20", batch: "CA1123", expiry: "2026-11-01", qty: 40 },
+        { name: "Captopril 25mg cp B30", batch: "A23861", expiry: "2029-03-01", qty: 63 },
+        { name: "Captopril 50mg cp B30", batch: "250185", expiry: "2028-04-01", qty: 46 },
+        { name: "Cardix 6.25 mg", batch: "235", expiry: "2027-03-01", qty: 13 },
+        { name: "Coveram 10/10mg", batch: "2570340028", expiry: "2028-08-01", qty: 25 },
+        { name: "Coveram 10/10mg", batch: "25253", expiry: "2028-12-01", qty: 10 },
+        { name: "Coveram 5/5", batch: "25197", expiry: "2028-10-01", qty: 38 },
+        { name: "Exforge 10mg/160mg", batch: "A0219U", expiry: "2028-04-01", qty: 20 },
+        { name: "fer inj 100mg/2ml B/100 Amp", batch: "250135", expiry: "2029-02-01", qty: 300 },
+        { name: "Furosemide 40mg cp", batch: "MU-105", expiry: "2028-03-01", qty: 40 },
+        { name: "Furosemide 40mg cp B/30", batch: "MU-139", expiry: "2028-11-01", qty: 90 },
+        { name: "glucophage 850mg cp B30", batch: "E213249", expiry: "2028-06-01", qty: 8 },
+        { name: "Levothyrox 100mcg cp B30", batch: "G02FF1", expiry: "2027-07-01", qty: 8 },
+        { name: "Levothyrox 25mcg cp B30", batch: "G028JT", expiry: "2026-12-01", qty: 18 },
+        { name: "Levothyrox 50mcg cp B30", batch: "G02CM8", expiry: "2027-04-01", qty: 20 },
+        { name: "levothyrox 75 mcg", batch: "G028JR", expiry: "2027-02-01", qty: 10 },
+        { name: "losartan 100mg", batch: "SW48401", expiry: "2028-02-01", qty: 87 },
+        { name: "losartan 50mg", batch: "SW47401", expiry: "2028-11-01", qty: 14 },
+        { name: "losartan 50mg", batch: "MU-75", expiry: "2028-03-01", qty: 62 },
+        { name: "Loxon LP 50mg B60/PL", batch: "004D", expiry: "2027-08-01", qty: 78 },
+        { name: "Omeprazole 20mg pl", batch: "LOMUC_004", expiry: "2027-12-01", qty: 60 },
+        { name: "Paracetamol 500mg PL", batch: "510250811", expiry: "2028-08-01", qty: 400 },
+        { name: "Pimara 30mg B/28", batch: "A26989", expiry: "2028-08-01", qty: 15 },
+        { name: "Pimara 60mg B/28", batch: "A27036B", expiry: "2028-08-01", qty: 27 },
+        { name: "plavix 75 mg", batch: "FA3024", expiry: "2027-06-01", qty: 6 },
+        { name: "plavix 75 mg", batch: "FLB00264", expiry: "2027-12-01", qty: 24 },
+        { name: "princip fort", batch: "142", expiry: "2027-06-01", qty: 20 },
+        { name: "QALYVIZ 0.5", batch: "A26500", expiry: "2027-08-01", qty: 67 },
+        { name: "Ramipil 5", batch: "RMP2401605", expiry: "2027-06-01", qty: 46 },
+        { name: "Ramipil 5", batch: "P2291", expiry: "2027-01-01", qty: 43 },
+        { name: "Ramipril NORMON 2.5mg cp B28", batch: "24E001", expiry: "2029-03-01", qty: 40 },
+        { name: "sintrom 4 mg", batch: "2310364", expiry: "2028-09-01", qty: 45 },
+        { name: "Taraxet 25mg", batch: "222381", expiry: "2027-07-01", qty: 42 },
+        { name: "Tardyferon B9", batch: "T01781", expiry: "2028-09-01", qty: 72 },
+        { name: "Targa 160mg", batch: "B9205K", expiry: "2027-01-01", qty: 47 },
+        { name: "Targa 80mg", batch: "B9197C", expiry: "2026-12-01", qty: 47 },
+        { name: "Targa 80mg", batch: "B9029V", expiry: "2026-07-01", qty: 24 },
+        { name: "Tenormine 100mg cp", batch: "250415", expiry: "2028-09-01", qty: 31 },
+        { name: "Tramapa 37.5mg B/30", batch: "V001", expiry: "2026-09-01", qty: 20 },
+        { name: "Uvedose AB", batch: "LL004", expiry: "2028-05-01", qty: 10 },
+        { name: "VANCOMYCINE 500mg", batch: "2124410B", expiry: "2027-11-01", qty: 75 },
+        { name: "zyloric 100", batch: "G6397", expiry: "2028-03-01", qty: 27 },
+        { name: "zyloric 200", batch: "A909199", expiry: "2026-12-01", qty: 28 },
+        { name: "Zyrtoc 10mg", batch: "222020", expiry: "2027-06-01", qty: 17 }
+    ];
+
+    try {
+        const { data: existingMeds } = await _supabase.from('medicines').select('id, name, batch');
+        const medMap = {};
+        (existingMeds || []).forEach(m => {
+            const key = `${m.name.toLowerCase().trim()}|${m.batch.toLowerCase().trim()}`;
+            medMap[key] = m.id;
+        });
+
+        const { data: maxIdRow } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
+        let nextId = maxIdRow ? (parseInt(maxIdRow.id) + 1) : 5000;
+
+        const newMeds = [];
+        rows.forEach(r => {
+            const key = `${r.name.toLowerCase().trim()}|${r.batch.toLowerCase().trim()}`;
+            if (!medMap[key]) {
+                newMeds.push({
+                    id: nextId++,
+                    name: r.name,
+                    batch: r.batch,
+                    expiry_date: r.expiry,
+                    qty: 0,
+                    entry_date: new Date().toISOString().split('T')[0]
+                });
+                medMap[key] = nextId - 1;
+            }
+        });
+
+        if (newMeds.length > 0) await _supabase.from('medicines').insert(newMeds);
+
+        const stockUpserts = rows.map(r => ({
+            pharmacy_id: 4,
+            medicine_id: medMap[`${r.name.toLowerCase().trim()}|${r.batch.toLowerCase().trim()}`],
+            qty: r.qty
+        }));
+
+        await _supabase.from('pharmacy_stock').upsert(stockUpserts, { onConflict: 'pharmacy_id,medicine_id' });
+        
+        window.showToast("Stock restauré avec succès !");
+        window.renderPharmacy(4);
+    } catch(err) {
+        console.error(err);
+        window.showToast("Erreur lors de la restauration", "error");
     }
 };
