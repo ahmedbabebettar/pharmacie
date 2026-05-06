@@ -2495,13 +2495,11 @@ window.renderView = async function(viewName) {
 
         // Build Pharmacy Details Rows
         let pharmRows = slicedPharm.map(row => {
-            const medSummary = Object.keys(row.data.meds).map(m => `<span>${m}: <strong>${row.data.meds[m]}</strong></span>`).join(' | ');
             return `
                 <tr>
                     <td style="white-space:nowrap;"><strong>${row.pKey}</strong></td>
                     <td>${state.pharmacies[row.pId]?.name?.fr || 'Pharmacie #'+row.pId}</td>
                     <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
-                    <td>${medSummary}</td>
                 </tr>
             `;
         }).join('');
@@ -2566,11 +2564,10 @@ window.renderView = async function(viewName) {
                             <th style="width:150px;">${t('th_period')}</th>
                             <th>${t('th_pharmacy')}</th>
                             <th style="text-align:center;">${t('th_beneficiaries')}</th>
-                            <th>${t('th_consumed_qty')}</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${pharmRows || `<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">${t('status_empty')}</td></tr>`}
+                        ${pharmRows || `<tr><td colspan="3" style="text-align:center; padding:30px; color:var(--text-muted);">${t('status_empty')}</td></tr>`}
                     </tbody>
                 </table>
             </div>
