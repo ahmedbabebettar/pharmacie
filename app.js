@@ -104,6 +104,31 @@ window.formatDate = function(dateStr) {
     }
     return dateStr;
 };
+ 
+window.formatReportPeriod = function(pKey, timeframe) {
+    if (!pKey || pKey === '-' || pKey === 'undefined') return '-';
+    if (timeframe === 'day') return window.formatDate(pKey);
+    if (timeframe === 'week') {
+        const d = new Date(pKey);
+        const startStr = window.formatDate(pKey);
+        d.setDate(d.getDate() + 7);
+        const endStr = window.formatDate(d.toISOString().split('T')[0]);
+        return currentLang === 'ar' ? `من ${startStr} إلى ${endStr}` : `Du ${startStr} au ${endStr}`;
+    }
+    if (timeframe === 'month') {
+        const parts = pKey.split('-');
+        if (parts.length < 2) return pKey;
+        const monthNames = {
+            '01': { ar: 'يناير', fr: 'Janvier' }, '02': { ar: 'فبراير', fr: 'Février' }, '03': { ar: 'مارس', fr: 'Mars' },
+            '04': { ar: 'أبريل', fr: 'Avril' }, '05': { ar: 'مايو', fr: 'Mai' }, '06': { ar: 'يونيو', fr: 'Juin' },
+            '07': { ar: 'يوليو', fr: 'Juillet' }, '08': { ar: 'أغسطس', fr: 'Août' }, '09': { ar: 'سبتمبر', fr: 'Septembre' },
+            '10': { ar: 'أكتوبر', fr: 'Octobre' }, '11': { ar: 'نوفمبر', fr: 'Novembre' }, '12': { ar: 'ديسمبر', fr: 'Décembre' }
+        };
+        const m = monthNames[parts[1]] ? monthNames[parts[1]][currentLang] : parts[1];
+        return `${m} ${parts[0]}`;
+    }
+    return pKey;
+};
 
 // Utility: Debounce
 window.debounce = function(func, wait) {
@@ -115,13 +140,11 @@ window.debounce = function(func, wait) {
 };
 
 // Logic for finding the Wednesday that ends the week of a given date
-function getWeekEndWednesday(dateStr) {
+function getWeekStartWednesday(dateStr) {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return '-';
-    // If it is Wednesday (day 3), keep it. 
-    // If it's Thursday (4) to Tuesday (2), find the NEXT Wednesday.
-    const day = d.getDay();
-    const diff = (day <= 3) ? (3 - day) : (10 - day);
+    const day = d.getDay(); // 0: Sun, 1: Mon, 2: Tue, 3: Wed, 4: Thu, 5: Fri, 6: Sat
+    let diff = (day >= 3) ? (3 - day) : (3 - day - 7);
     d.setDate(d.getDate() + diff);
     return d.toISOString().split('T')[0];
 }
@@ -133,7 +156,7 @@ function getGroupedKey(dateStr, unit) {
     if (isNaN(d.getTime())) return '-';
 
     if (unit === 'day') return d.toISOString().split('T')[0];
-    if (unit === 'week') return getWeekEndWednesday(dateStr);
+    if (unit === 'week') return getWeekStartWednesday(dateStr);
     if (unit === 'month') return dateStr.substring(0, 7); // YYYY-MM
     if (unit === 'year') return dateStr.substring(0, 4); // YYYY
     return dateStr;
@@ -2497,7 +2520,7 @@ window.renderView = async function(viewName) {
         let pharmRows = slicedPharm.map(row => {
             return `
                 <tr>
-                    <td style="white-space:nowrap;"><strong>${window.formatDate(row.pKey)}</strong></td>
+                    <td style="white-space:nowrap;"><strong>${window.formatReportPeriod(row.pKey, timeframe)}</strong></td>
                     <td>${state.pharmacies[row.pId]?.name?.fr || 'Pharmacie #'+row.pId}</td>
                     <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
                 </tr>
@@ -2508,7 +2531,7 @@ window.renderView = async function(viewName) {
         let globalRows = slicedGlobal.map(row => {
             return `
                 <tr>
-                    <td style="white-space:nowrap;"><strong>${row.pKey}</strong></td>
+                    <td style="white-space:nowrap;"><strong>${window.formatReportPeriod(row.pKey, timeframe)}</strong></td>
                     <td><strong>${row.mName}</strong></td>
                     <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
                     <td style="text-align:center;"><span class="status-badge good">${row.data.qty}</span></td>
