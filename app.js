@@ -578,16 +578,10 @@ async function loadDataFromSupabase() {
         }
 
         // SCALABILITY: Fetch pharmacy activity stats (patient counts and percentages)
+        // RPC is now mandatory to prevent N sequential requests
         const { data: activityData } = await _supabase.rpc('get_pharmacy_stats');
-        // If RPC is missing, fallback to count unique patients in JS (manageable for thousands of rows)
-        if (!activityData) {
-            for (const id in state.pharmacies) {
-                const { data: dispData } = await _supabase.from('dispensations').select('patient_name').eq('pharmacy_id', id);
-                const uniqueCount = new Set((dispData || []).map(d => d.patient_name)).size;
-                state.pharmacies[id].patients = uniqueCount;
-                state.pharmacies[id].percent = Math.min(100, Math.floor(uniqueCount / 10)); // Example target
-            }
-        } else {
+        
+        if (activityData) {
             activityData.forEach(row => {
                 if (state.pharmacies[row.pharmacy_id]) {
                     state.pharmacies[row.pharmacy_id].patients = row.patient_count;
