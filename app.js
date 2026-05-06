@@ -3372,7 +3372,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     const bestLot = eligibleBatches[0].batch;
                     if (selectedLot !== bestLot) {
                         const isManager = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
-                        let bypass = false;
+                        let bypass = window._isExceptional;
                         if (isManager) {
                             bypass = await window.showCustomDialog({
                                 title: currentLang === 'ar' ? 'تجاوز شرط الصلاحية' : "Contournement FEFO",
