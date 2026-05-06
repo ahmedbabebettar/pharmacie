@@ -2977,12 +2977,22 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }
     const pHistoryState = pagination[pHistoryKey];
 
-    // 1. Fetch ALL stock for this pharmacy to allow local fast filtering
-    const { data: allStockData, error: stockErr } = await _supabase.from('pharmacy_stock')
-        .select('*, medicines(id, name, batch, expiry_date)')
-        .eq('pharmacy_id', pharmId);
-    
-    if (stockErr) throw stockErr;
+    // 1. Fetch ALL stock for this pharmacy (up to 50k) to allow local fast filtering
+    let allStockData = [];
+    let stockFrom = 0;
+    const stockStep = 1000;
+    while (stockFrom < 50000) {
+        const { data, error } = await _supabase.from('pharmacy_stock')
+            .select('*, medicines(id, name, batch, expiry_date)')
+            .eq('pharmacy_id', pharmId)
+            .range(stockFrom, stockFrom + stockStep - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allStockData = allStockData.concat(data);
+        stockFrom += stockStep;
+        if (data.length < stockStep) break;
+    }
     
     // Update local p.stock cache to support other functions (returns, etc)
     p.stock = (allStockData || []).filter(ps => ps.medicines != null).map(ps => ({
