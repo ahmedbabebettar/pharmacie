@@ -3153,7 +3153,10 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 </datalist>
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <button type="button" class="primary-btn" onclick="window.addDispRow(${pharmId})"><i class="fa-solid fa-plus-circle"></i> Ajouter</button>
-                    <button type="submit" class="primary-btn" style="background:var(--accent-green); padding:12px 32px;"><i class="fa-solid fa-check-double"></i> Confirmer la Délivrance</button>
+                    <div style="display:flex; gap:10px;">
+                        ${isFullAdmin ? `<button type="button" class="primary-btn" style="background:#6366f1;" onclick="window.triggerExceptionalDispense(${pharmId})"><i class="fa-solid fa-bolt"></i> ${currentLang==='ar'?'صرف استثنائي':'Saisie Exceptionnelle'}</button>` : ''}
+                        <button type="submit" class="primary-btn" style="background:var(--accent-green); padding:12px 32px;"><i class="fa-solid fa-check-double"></i> Confirmer la Délivrance</button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -3310,7 +3313,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 }
             }
 
-            if (!matchedPatient) {
+            if (!matchedPatient && !window._isExceptional) {
                 window.showToast(t('error_unregistered_patient') || "Patient introuvable dans le système. Veuillez d'abord l'enregistrer.", 'error');
                 return;
             }
