@@ -526,12 +526,20 @@ async function loadDataFromSupabase() {
             _supabase.from('medicines').select('id', { count: 'exact', head: true }).lt('qty', 50)
         ]);
 
-        // SCALABILITY: Get real sums for the dashboard instead of just row counts
-        const { data: medQtyData } = await _supabase.from('medicines').select('qty');
-        const sumMeds = (medQtyData || []).reduce((acc, m) => {
-            const q = parseInt(m.qty);
-            return acc + (isNaN(q) ? 0 : q);
-        }, 0);
+        // SCALABILITY: Get real sums for the dashboard using RPC if possible
+        let sumMeds = 0;
+        const { data: rpcSum, error: rpcErr } = await _supabase.rpc('get_total_stock');
+        
+        if (!rpcErr && rpcSum !== null) {
+            sumMeds = parseInt(rpcSum);
+        } else {
+            // Fallback: Fetch ONLY the qty column (minimizes network payload)
+            const { data: medQtyData } = await _supabase.from('medicines').select('qty');
+            sumMeds = (medQtyData || []).reduce((acc, m) => {
+                const q = parseInt(m.qty);
+                return acc + (isNaN(q) ? 0 : q);
+            }, 0);
+        }
 
         // Update state statistics
         state.stats = {
@@ -2460,7 +2468,10 @@ window.renderView = async function(viewName) {
         
         const isoStart = startDate.toISOString().split('T')[0];
         // SCALABILITY: Fetch a larger batch for analytics (up to 10,000 records)
-        const { data: reportData } = await _supabase.from('dispensations').select('*').gte('date', isoStart).limit(10000);
+        const { data: reportData } = await _supabase.from('dispensations')
+            .select('date, pharmacy_id, medicine_name, patient_name, qty')
+            .gte('date', isoStart)
+            .limit(10000);
         const dispensations = reportData || [];
 
         // Grouping 1 (By Pharmacy)
