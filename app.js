@@ -3313,7 +3313,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 }
             }
 
-            if (!matchedPatient && !window._isExceptional) {
+            if (!matchedPatient) {
                 window.showToast(t('error_unregistered_patient') || "Patient introuvable dans le système. Veuillez d'abord l'enregistrer.", 'error');
                 return;
             }
