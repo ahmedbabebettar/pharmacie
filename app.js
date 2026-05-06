@@ -3512,7 +3512,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 console.error(err);
                 window.showToast("Erreur lors de la délivrance", "error");
             }
-        });
+        };
     }
     
     // Order Form Submittal (Bon de Commande)
