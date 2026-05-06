@@ -2937,6 +2937,12 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }
     const pStockState = pagination[pStateKey];
 
+    const pHistoryKey = `history_${pharmId}`;
+    if (!pagination[pHistoryKey]) {
+        pagination[pHistoryKey] = { currentPage: 1, pageSize: 25, total: 0, search: '' };
+    }
+    const pHistoryState = pagination[pHistoryKey];
+
     // 1. Fetch ALL stock for this pharmacy to allow local fast filtering
     const { data: allStockData, error: stockErr } = await _supabase.from('pharmacy_stock')
         .select('*, medicines(id, name, batch, expiry_date)')
@@ -2987,14 +2993,16 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             (await _supabase.from('medicines').select('id').lt('expiry_date', new Date().toISOString().split('T')[0])).data?.map(m => m.id) || []
         ),
         fetchTableData('dispensations', { 
-            page: pagination.dispensations.currentPage, 
-            pageSize: pagination.dispensations.pageSize, 
+            page: pHistoryState.currentPage, 
+            pageSize: pHistoryState.pageSize, 
+            search: pHistoryState.search,
             filters: { pharmacy_id: numericId },
             order: { col: 'date', ascending: false }
         }),
         _supabase.from('medicines').select('id, name, batch, expiry_date').order('name', { ascending: true }).limit(1000),
         _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(100)
     ]);
+    pHistoryState.total = historyTotal;
 
     // Data for Dispense Datalist (Only valid medicines in stock)
     const searchableStock = (allStockData || []).filter(ps => ps.medicines != null && ps.qty > 0).map(ps => ({
@@ -3174,8 +3182,14 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     let finalBody = '';
     if (subView === 'history') {
         finalBody = `
-            <div class="transfer-card">
-                <div class="block-title"><i class="fa-solid fa-clock-rotate-left"></i> Historique des Délivrances</div>
+            <div class="transfer-card animated fadeIn">
+                <div class="block-title" style="display:flex; justify-content:space-between; align-items:center; padding: 20px 25px;">
+                    <div><i class="fa-solid fa-clock-rotate-left"></i> Historique des Délivrances</div>
+                    <div class="search-box" style="margin:0; width:300px; background:#f8fafc;">
+                        <i class="fa-solid fa-search"></i>
+                        <input type="text" id="search-pharm-history" placeholder="Rechercher (médoc, patient)..." value="${pHistoryState.search || ''}">
+                    </div>
+                </div>
                 <div class="table-container shadow-sm">
                     <table>
                         <thead><tr><th>Réf.</th><th>Date</th><th>Patient</th><th>Médicament</th><th>Qté</th><th>Staff</th></tr></thead>
@@ -3189,11 +3203,13 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                                     <td><span class="status-badge warning">-${d.qty}</span></td>
                                     <td>${window.parseWorkerName(d.dispensed_by, currentLang)}</td>
                                 </tr>
-                            `).join('') || `<tr><td colspan="6" style="text-align:center; padding:30px;">Aucun historique.</td></tr>`}
+                            `).join('') || `<tr><td colspan="6" style="text-align:center; padding:30px;">Aucun historique trouvé.</td></tr>`}
                         </tbody>
                     </table>
                 </div>
-                ${renderPaginationControls('dispensations', historyTotal)}
+                <div style="padding:15px 25px; background:#f8fafc; border-top:1px solid #f1f5f9;">
+                    ${renderPaginationControls(pHistoryKey)}
+                </div>
             </div>
         `;
     } else if (subView === 'pharm-dispense') {
@@ -3209,14 +3225,24 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     viewContainer.innerHTML = dashboardHeaderHtml + tabsHtml + finalBody;
 
     // --- LISTENERS ---
-    const searchInput = document.getElementById('search-pharm-stock-main');
-    if (searchInput) {
-        searchInput.focus();
-        // Keep cursor at end
-        const val = searchInput.value; searchInput.value = ''; searchInput.value = val;
-        searchInput.addEventListener('input', window.debounce((e) => {
+    const stockSearch = document.getElementById('search-pharm-stock-main');
+    if (stockSearch) {
+        stockSearch.focus();
+        const val = stockSearch.value; stockSearch.value = ''; stockSearch.value = val;
+        stockSearch.addEventListener('input', window.debounce((e) => {
             pStockState.search = e.target.value;
             pStockState.currentPage = 1;
+            window.renderPharmacy(pharmId, subView);
+        }, 300));
+    }
+
+    const historySearch = document.getElementById('search-pharm-history');
+    if (historySearch) {
+        historySearch.focus();
+        const val = historySearch.value; historySearch.value = ''; historySearch.value = val;
+        historySearch.addEventListener('input', window.debounce((e) => {
+            pHistoryState.search = e.target.value;
+            pHistoryState.currentPage = 1;
             window.renderPharmacy(pharmId, subView);
         }, 300));
     }
