@@ -3262,8 +3262,9 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     if (subView === 'pharm-dispense') window.addDispRow(pharmId);
 
     const dispForm = document.getElementById(`bulk-dispense-form-${pharmId}`);
-    if(dispForm) {
-        dispForm.onsubmit = async (e) => {
+    if(dispForm && !dispForm.dataset.listenerAttached) {
+        dispForm.dataset.listenerAttached = 'true';
+        dispForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const patientInput = document.getElementById(`disp-patient-${pharmId}`).value.trim();
             
@@ -3389,16 +3390,15 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
             if(!valid || items.length === 0) return;
 
-            // --- REGLE DES 28 JOURS — Direct Supabase Query (scalable) ---
+            // --- REGLE DES 28 JOURS ---
             const twentyEightDaysAgo = new Date();
             twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
             
             if (!window._isExceptional) {
-                // Run all 28-day checks in parallel (one query per medicine)
                 const checks = items.map(item =>
                     _supabase.from('dispensations')
                         .select('date', { count: 'exact', head: false })
-                        .ilike('patient_name', patientName) // Case-insensitive match
+                        .ilike('patient_name', patientName)
                         .eq('medicine_name', item.medName)
                         .gte('date', twentyEightDaysAgo.toISOString())
                         .order('date', { ascending: false })
@@ -3408,7 +3408,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 const checkResults = await Promise.all(checks);
 
                 for (const result of checkResults) {
-                    if (result.error) { console.warn('28-day check error:', result.error); continue; }
+                    if (result.error) continue;
                     if (result.data && result.data.length > 0) {
                         const lastDispDate = new Date(result.data[0].date).toLocaleDateString('fr-FR');
                         await window.showCustomDialog({
@@ -3426,84 +3426,52 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             } else {
                 window.showToast(currentLang === 'ar' ? 'تم تجاوز حاجز الـ 28 يوماً استثنائياً' : 'Délivrance exceptionnelle approuvée', 'info');
             }
-
-            // Always reset the override flag
             window._isExceptional = false;
-
             if(!valid) return;
-            // --- FIN REGLE ---
 
             try {
                 const barcode = await window.getNextCounterValue('dispense');
                 const nowIso = new Date().toISOString();
                 const workerName = currentUser ? (typeof currentUser.name === 'object' ? currentUser.name.fr : currentUser.name) : 'Staff';
 
-                // --- BULK OPERATIONS (2 requests total, regardless of medicine count) ---
-
-                // 1. Bulk insert all dispensation records at once
                 const dispensationRecords = items.map(item => ({
-                    date: nowIso,
-                    patient_name: patientName,
-                    medicine_id: item.medId,
-                    medicine_name: item.medName,
-                    qty: item.qty,
-                    pharmacy_id: pharmId,
-                    dispensed_by: workerName,
-                    reference: barcode
+                    date: nowIso, patient_name: patientName, medicine_id: item.medId,
+                    medicine_name: item.medName, qty: item.qty, pharmacy_id: pharmId,
+                    dispensed_by: workerName, reference: barcode
                 }));
                 const { error: dispErr } = await _supabase.from('dispensations').insert(dispensationRecords);
                 if (dispErr) throw dispErr;
 
-                // 2. NUCLEAR DATA INTEGRITY FIX: Unique Consolidation
+                // 2. NUCLEAR DATA INTEGRITY FIX
                 const decrements = {};
-                items.forEach(it => {
-                    decrements[it.medId] = (decrements[it.medId] || 0) + it.qty;
-                });
+                items.forEach(it => { decrements[it.medId] = (decrements[it.medId] || 0) + it.qty; });
                 const uniqueMedIds = Object.keys(decrements).map(id => parseInt(id));
 
                 const { data: allFreshRows, error: freshErr } = await _supabase.from('pharmacy_stock')
                     .select('id, medicine_id, qty')
                     .eq('pharmacy_id', pharmId)
                     .in('medicine_id', uniqueMedIds);
-                
                 if (freshErr) throw freshErr;
 
                 const totalsMap = {};
-                (allFreshRows || []).forEach(s => {
-                    totalsMap[s.medicine_id] = (totalsMap[s.medicine_id] || 0) + s.qty;
-                });
-
-                // --- CONSOLIDATION SUCCESSFUL ---
+                (allFreshRows || []).forEach(s => { totalsMap[s.medicine_id] = (totalsMap[s.medicine_id] || 0) + s.qty; });
 
                 const stockInserts = uniqueMedIds.map(medId => {
                     const currentTotal = totalsMap[medId] || 0;
                     const totalToDispense = decrements[medId];
-                    return {
-                        pharmacy_id: pharmId,
-                        medicine_id: medId,
-                        qty: Math.max(0, currentTotal - totalToDispense)
-                    };
+                    return { pharmacy_id: pharmId, medicine_id: medId, qty: Math.max(0, currentTotal - totalToDispense) };
                 });
 
-                // Delete all old rows for these medicines
                 const idsToDelete = (allFreshRows || []).map(r => r.id);
-                if (idsToDelete.length > 0) {
-                    const { error: delErr } = await _supabase.from('pharmacy_stock').delete().in('id', idsToDelete);
-                    if (delErr) throw delErr;
-                }
+                if (idsToDelete.length > 0) await _supabase.from('pharmacy_stock').delete().in('id', idsToDelete);
+                await _supabase.from('pharmacy_stock').insert(stockInserts);
 
-                // Insert ONE clean row per medicine
-                const { error: insErr } = await _supabase.from('pharmacy_stock').insert(stockInserts);
-                if (insErr) throw insErr;
-
-                // 3. Update local cache (if it exists) to keep UI in sync without full reload
                 if (p && p.stock) {
                     items.forEach(item => {
                         const med = p.stock.find(m => m.id === item.medId);
                         if (med) med.qty = Math.max(0, med.qty - item.qty);
                     });
                 }
-
 
                 await window.showCustomDialog({ title: "Succès", msg: t('alert_success'), icon: "fa-circle-check" });
                 await window.autoDownloadReceipt('DELIVRANCE', patientName, items, barcode);
@@ -3512,7 +3480,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 console.error(err);
                 window.showToast("Erreur lors de la délivrance", "error");
             }
-        };
+        });
     }
     
     // Order Form Submittal (Bon de Commande)
