@@ -132,7 +132,7 @@ function getGroupedKey(dateStr, unit) {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return '-';
 
-    if (unit === 'day') return dateStr;
+    if (unit === 'day') return d.toISOString().split('T')[0];
     if (unit === 'week') return getWeekEndWednesday(dateStr);
     if (unit === 'month') return dateStr.substring(0, 7); // YYYY-MM
     if (unit === 'year') return dateStr.substring(0, 4); // YYYY
@@ -2497,7 +2497,7 @@ window.renderView = async function(viewName) {
         let pharmRows = slicedPharm.map(row => {
             return `
                 <tr>
-                    <td style="white-space:nowrap;"><strong>${row.pKey}</strong></td>
+                    <td style="white-space:nowrap;"><strong>${window.formatDate(row.pKey)}</strong></td>
                     <td>${state.pharmacies[row.pId]?.name?.fr || 'Pharmacie #'+row.pId}</td>
                     <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
                 </tr>
