@@ -613,6 +613,62 @@ async function loadDataFromSupabase() {
     }
 }
 
+// Optimistic State Update Helper
+window.optimisticUpdate = function(action, payload = {}) {
+    if (!state.stats) return;
+
+    switch(action) {
+        case 'order_added':
+            state.counters.order = (state.counters.order || 0) + 1;
+            state.orders.push({
+                id: payload.id,
+                date: new Date().toISOString(),
+                pharmacy_id: payload.pharmId,
+                worker_name: payload.workerName,
+                status: 'PENDING',
+                items: payload.items
+            });
+            break;
+        case 'order_processed':
+            state.orders = state.orders.filter(o => o.id !== payload.id);
+            if (state.counters.order > 0) state.counters.order -= 1;
+            break;
+        case 'patient_deleted':
+            state.stats.totalPatients = Math.max(0, (state.stats.totalPatients || 0) - 1);
+            break;
+        case 'patient_added':
+            state.stats.totalPatients = (state.stats.totalPatients || 0) + 1;
+            break;
+        case 'dispense_pharmacy':
+            state.stats.totalDispensations = (state.stats.totalDispensations || 0) + 1;
+            state.counters.dispense = (state.counters.dispense || 0) + 1;
+            break;
+        case 'return_pending':
+            state.pendingReturns.unshift(payload);
+            break;
+        case 'return_approved':
+            state.pendingReturns = state.pendingReturns.filter(r => r.id !== payload.id);
+            state.stats.totalMeds += payload.qty; // Returns to central stock
+            break;
+        case 'transfer_added':
+            state.stats.totalDistributions = (state.stats.totalDistributions || 0) + 1;
+            state.transfers.unshift(payload);
+            if(state.transfers.length > 6) state.transfers.pop();
+            break;
+        case 'central_stock_change':
+            // For complex central stock changes, trigger background reload without blocking UI
+            loadDataFromSupabase(); 
+            return; 
+    }
+    
+    window.updateSidebarPharmacies();
+    // Refresh dashboard instantly if active
+    if (document.querySelector('.tab-btn[onclick="window.renderView(\\'dashboard\\')"]')?.classList.contains('active')) {
+        window.renderView('dashboard');
+    }
+};
+
+
 
 // PATCH MARKER START - BULLETPROOF importPharmacyStock
 window.importPharmacyStock = async function(event, pharmId) {
@@ -730,7 +786,7 @@ window.importPharmacyStock = async function(event, pharmId) {
             }
 
             window.showToast(currentLang === 'ar' ? 'تم الاستيراد بنجاح' : "Importation terminée !");
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             await window.renderPharmacy(pharmId, 'all');
         } catch (err) {
             console.error("Critical Import Error:", err);
@@ -792,7 +848,7 @@ window.resetCounters = async function() {
     if (confirm) {
         try {
             await _supabase.from('app_counters').update({ value: 0 }).in('id', ['delivery', 'order', 'dispense']);
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.showToast("Compteurs réinitialisés à 0");
         } catch (err) {
             console.error(err);
@@ -926,7 +982,7 @@ window.migrateLocalData = async function() {
         }
 
         window.showToast(currentLang === 'ar' ? "تم ترحيل البيانات والحسابات بنجاح !" : "Migration terminée avec succès !");
-        await loadDataFromSupabase();
+        window.optimisticUpdate('central_stock_change');
     } catch (err) {
         console.error("Migration error:", err);
         window.showToast("Erreur pendant la migration.", "error");
@@ -1069,7 +1125,7 @@ window.attemptLogin = async function() {
             document.getElementById('main-app').style.display = 'flex';
             
             // Load data from Supabase immediately after login
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
 
             document.querySelectorAll('.nav-btn, .nav-group-title, .nav-divider').forEach(el => {
                 if(el.hasAttribute('data-pharmacy-only')) {
@@ -1180,7 +1236,7 @@ window.attemptLogin = async function() {
                 if (error) throw error;
             }
             
-            await loadDataFromSupabase(); // Reload global state
+            window.optimisticUpdate('central_stock_change'); // Reload global state
             showToast("Médicament enregistré avec succès");
             
             addMedModal.classList.remove('active');
@@ -2858,7 +2914,7 @@ window.handleCentralImport = async function(e) {
                 successCount += chunk.length;
             }
 
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.showToast("Importation réussie! " + successCount + " articles traités.");
             window.renderView('central');
         } catch (err) {
@@ -2909,7 +2965,7 @@ window.handlePatientsImport = function(file) {
                 if (res.error) throw res.error;
             }
             
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.showToast(t('alert_success'));
             window.renderView('patients');
         } catch (err) {
@@ -3625,7 +3681,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 
                 if (insertError) throw insertError;
                 
-                await loadDataFromSupabase();
+                window.optimisticUpdate('order_added', { id: barcode, pharmId: safePharmId, workerName: workerName, items: items });
                 await window.showCustomDialog({ title: "Succès", msg: "Votre Bon de Commande a été envoyé avec succès au Stock Central.", icon: "fa-circle-check" });
                 await window.autoDownloadReceipt('COMMANDE', 'Pharmacie Centrale (Stock)', items, barcode);
                 window.renderPharmacy(pharmId, 'pharm-order');
@@ -3692,7 +3748,7 @@ window.deletePatient = async function(id) {
     if(confirm) {
         try {
             await _supabase.from('patients').delete().eq('id', id);
-            await loadDataFromSupabase();
+            window.optimisticUpdate('patient_deleted', { id: id });
             window.renderView('patients');
         } catch (err) { console.error(err); }
     }
@@ -3755,7 +3811,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     await _supabase.from('patients').insert([payload]);
                 }
                 
-                await loadDataFromSupabase();
+                if (!id) window.optimisticUpdate('patient_added');
                 document.getElementById('patient-modal').classList.remove('active');
                 window.renderView('patients');
                 window.showToast(currentLang === 'ar' ? "تم حفظ بيانات المريض بنجاح" : "Patient enregistré !");
@@ -3772,7 +3828,7 @@ window.deleteMedicine = async function(id) {
     if(confirm) {
         try {
             await _supabase.from('medicines').delete().eq('id', id);
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.renderView('central');
         } catch (err) { console.error(err); }
     }
@@ -3828,7 +3884,7 @@ window.returnToCentral = async function(pharmId, medId) {
 
         if (error) throw error;
         
-        await loadDataFromSupabase();
+        window.optimisticUpdate('central_stock_change');
         await window.showCustomDialog({ title: "Succès", msg: t('alert_request_sent'), icon: 'fa-circle-check' });
         
         // Refresh view
@@ -3887,7 +3943,7 @@ window.approveReturn = async function(reqId) {
         // D. Mark Request as APPROVED
         await _supabase.from('return_requests').update({ status: 'APPROVED' }).eq('id', reqId);
         
-        await loadDataFromSupabase();
+        window.optimisticUpdate('return_approved', { id: reqId, qty: parseInt(req.qty) || 0 });
         window.showToast("Retour approuvé avec succès");
         window.renderView(activeView);
     } catch (err) {
@@ -3899,7 +3955,7 @@ window.approveReturn = async function(reqId) {
 window.rejectReturn = async function(reqId) {
     try {
         await _supabase.from('return_requests').update({ status: 'REJECTED' }).eq('id', reqId);
-        await loadDataFromSupabase();
+        window.optimisticUpdate('return_approved', { id: reqId, qty: 0 }); // rejection doesn't add stock
         window.showToast("Demande rejetée");
         window.renderView(activeView);
     } catch (err) {
@@ -3918,7 +3974,7 @@ window.markOrderTreated = async function(orderId) {
     if(confirm) {
         try {
             await _supabase.from('orders').update({ status: 'TREATED' }).eq('id', orderId);
-            await loadDataFromSupabase();
+            window.optimisticUpdate('order_processed', { id: orderId });
             window.showToast("Commande marquée comme Traitée.");
             if (activeView === 'admin_orders') {
                 window.renderView('admin_orders');
@@ -3944,7 +4000,7 @@ window.deleteSelectedMeds = async function() {
     if(confirm) {
         try {
             await _supabase.from('medicines').delete().in('id', selected);
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.renderView('central');
         } catch (err) { console.error(err); }
     }
@@ -3965,7 +4021,7 @@ window.deleteSelectedPatients = async function() {
     if(confirm) {
         try {
             await _supabase.from('patients').delete().in('id', selected);
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.renderView('patients');
         } catch (err) { console.error(err); }
     }
@@ -4016,7 +4072,7 @@ window.deleteFromPharmacyStock = async function(pharmId, medId) {
     if(confirm) {
         try {
             await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).eq('medicine_id', medId);
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.renderPharmacy(pharmId);
         } catch (err) { console.error(err); }
     }
@@ -4033,7 +4089,7 @@ window.deleteSelectedPharmacyStock = async function(pharmId) {
     if(confirm) {
         try {
             await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).in('medicine_id', selected);
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.renderPharmacy(pharmId);
         } catch (err) { console.error(err); }
     }
@@ -4057,7 +4113,7 @@ window.deleteAllMeds = async function() {
             try {
                 // Delete from medicines (cascades to pharmacy_stock)
                 await _supabase.from('medicines').delete().neq('id', 0); // Delete all where ID != 0 (effectively all)
-                await loadDataFromSupabase();
+                window.optimisticUpdate('central_stock_change');
                 window.renderView('central');
                 window.showToast("Stock réinitialisé.");
             } catch (err) { console.error(err); }
@@ -4082,7 +4138,7 @@ window.deleteAllPatients = async function() {
             window.showToast("Suppression en cours...", "info");
             try {
                 await _supabase.from('patients').delete().neq('id', 0); 
-                await loadDataFromSupabase();
+                window.optimisticUpdate('central_stock_change');
                 window.renderView('patients');
                 window.showToast("Liste des patients vidée.");
             } catch (err) { console.error(err); }
@@ -4431,7 +4487,7 @@ window.addPharmacy = async function() {
             color: color || "#047857"
         }]);
         if (error) throw error;
-        await loadDataFromSupabase();
+        window.optimisticUpdate('central_stock_change');
         renderView('manage_pharmacies');
         showToast("Pharmacie ajoutée");
     } catch(e) { console.error(e); window.showCustomDialog({ title: "Erreur", msg: "Impossible d'ajouter la pharmacie.", icon: 'fa-circle-exclamation' }); }
@@ -4488,7 +4544,7 @@ window.editPharmacy = async function(id) {
         // Update local state immediately
         state.pharmacies[numId] = { ...p, name: { fr: newNameFr, ar: newNameAr }, color: newColor || p.color };
         
-        await loadDataFromSupabase();
+        window.optimisticUpdate('central_stock_change');
         window.renderView('manage_pharmacies');
         showToast("Pharmacie mise à jour avec succès");
     } catch(e) { 
@@ -4503,7 +4559,7 @@ window.deletePharmacy = async function(id) {
     try {
         const { error } = await _supabase.from('pharmacies').delete().eq('id', id);
         if (error) throw error;
-        await loadDataFromSupabase();
+        window.optimisticUpdate('central_stock_change');
         renderView('manage_pharmacies');
         showToast("Pharmacie supprimée");
     } catch(e) { console.error(e); window.showCustomDialog({ title: "Erreur", msg: "Impossible de supprimer (liens existants).", icon: 'fa-circle-exclamation' }); }
@@ -4570,7 +4626,7 @@ window.handlePhotoUpload = async function(event, receiptId) {
         try {
             const {error} = await _supabase.from('receipts').update({ signed_photo: dataUrl }).eq('id', receiptId);
             if(error) throw error;
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.renderView('admin_decharges');
             window.showToast("Justificatif enregistré !", "success");
         } catch(err) {
@@ -4670,7 +4726,7 @@ if (_supabase) {
             } catch(e) { /* Sound not supported */ }
 
             // Reload data and refresh dashboard silently
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
         })
         .subscribe((status) => {
             console.log('Realtime subscription status:', status);
@@ -4711,7 +4767,7 @@ setInterval(async () => {
             const diff = currentCount - lastKnownOrderCount;
             window.showToast(`🛒 ${diff} nouveau(x) Bon(s) de Commande en attente !`, 'warning');
             playNotificationSound();
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
         }
         lastKnownOrderCount = currentCount;
     } catch(e) { /* Polling failed silently */ }
@@ -4758,7 +4814,7 @@ window.consolidateStock = async function() {
                 await _supabase.from('medicines').delete().in('id', toDelete);
             }
 
-            await loadDataFromSupabase();
+            window.optimisticUpdate('central_stock_change');
             window.showToast("Stock consolidé avec succès !");
             window.renderView('dashboard');
         } catch(err) {
@@ -4877,7 +4933,7 @@ window.repairOrphan = async function(oldId) {
         await _supabase.from('pharmacy_stock').delete().eq('medicine_id', oldId);
         
         window.showToast("تم الإصلاح بنجاح!", "success");
-        await loadDataFromSupabase();
+        window.optimisticUpdate('central_stock_change');
         window.renderView('dashboard');
     } catch (err) {
         console.error(err);
