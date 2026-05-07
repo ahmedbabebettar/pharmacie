@@ -4284,8 +4284,77 @@ window.exportToExcel = async function(tableId, fileName) {
         window.showCustomDialog({ title: "Oups", msg: "La bibliothèque d'exportation n'est pas encore chargée.", icon: 'fa-triangle-exclamation' });
         return;
     }
+
+    // INTERCEPT PAGINATED TABLES TO FETCH FULL DATA AS JSON
+    if (tableId === 'records-table' || tableId === 'my-register-table') {
+        window.showToast("Préparation de l'exportation complète...", "info");
+        try {
+            let query = _supabase.from('dispensations').select('date, patient_name, medicine_name, qty, pharmacy_id, dispensed_by, reference').order('date', { ascending: false }).limit(50000);
+            
+            if (tableId === 'my-register-table') {
+                const pharmId = window.preSelectedPharm || (currentUser && currentUser.pharmacyId);
+                if (pharmId) query = query.eq('pharmacy_id', pharmId);
+            }
+            
+            const { data, error } = await query;
+            if (error) throw error;
+            
+            const exportData = data.map(d => ({
+                "Date": new Date(d.date).toLocaleDateString('fr-FR'),
+                "Référence": d.reference || '',
+                "Patient": d.patient_name,
+                "Médicament": d.medicine_name,
+                "Qté": d.qty,
+                "Pharmacie": state.pharmacies[d.pharmacy_id] ? (state.pharmacies[d.pharmacy_id].name.fr || state.pharmacies[d.pharmacy_id].name.ar) : 'Inconnu',
+                "Distribué par": d.dispensed_by || ''
+            }));
+            
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Data");
+            XLSX.writeFile(wb, fileName + ".xlsx");
+            window.showToast("Export Excel réussi !");
+            return;
+        } catch (err) {
+            console.error(err);
+            window.showToast("Erreur lors de l'exportation.", "error");
+            return;
+        }
+    }
+    
+    if (tableId === 'expired-table') {
+        window.showToast("Préparation de l'exportation des périmés...", "info");
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const { data, error } = await _supabase.from('medicines').select('name, batch, expiry_date, qty, price').lt('expiry_date', today).limit(50000);
+            if (error) throw error;
+            
+            const exportData = data.map(d => ({
+                "Médicament": d.name,
+                "Lot": d.batch,
+                "Date d'expiration": new Date(d.expiry_date).toLocaleDateString('fr-FR'),
+                "Qté en stock": d.qty,
+                "Prix Achat": d.price || 0
+            }));
+            
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Data");
+            XLSX.writeFile(wb, fileName + ".xlsx");
+            window.showToast("Export Excel réussi !");
+            return;
+        } catch (err) {
+            console.error(err);
+            window.showToast("Erreur lors de l'exportation.", "error");
+            return;
+        }
+    }
+
+    // FALLBACK: For non-paginated tables (like Reports), DOM export is perfect and preserves complex aggregations
+    window.showToast("Génération du fichier Excel...", "info");
     var wb = XLSX.utils.table_to_book(document.getElementById(tableId), {sheet: "Data"});
     XLSX.writeFile(wb, fileName + ".xlsx");
+    window.showToast(currentLang === 'ar' ? 'تم تصدير ملف Excel بنجاح!' : "Export Excel réussi !");
 };
 
 window.printPage = function() {
