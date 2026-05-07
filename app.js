@@ -601,8 +601,8 @@ async function loadDataFromSupabase() {
             dispensedBy: t.dispensed_by 
         })) : [];
 
-        // Fetch pending orders
-        const { data: pendingOrds } = await _supabase.from('orders').select('*');
+        // Fetch pending orders (OPTIMIZED: Only fetch PENDING to avoid massive payloads)
+        const { data: pendingOrds } = await _supabase.from('orders').select('*').eq('status', 'PENDING');
         state.orders = pendingOrds || [];
 
         window.updateSidebarPharmacies();
@@ -656,8 +656,12 @@ window.optimisticUpdate = function(action, payload = {}) {
             if(state.transfers.length > 6) state.transfers.pop();
             break;
         case 'central_stock_change':
-            // For complex central stock changes, trigger background reload without blocking UI
-            loadDataFromSupabase(); 
+            // For complex central stock changes, trigger background reload and then update UI
+            loadDataFromSupabase().then(() => {
+                if (typeof activeView !== 'undefined' && activeView === 'dashboard') {
+                    window.renderView('dashboard');
+                }
+            });
             return; 
     }
     
@@ -1124,8 +1128,8 @@ window.attemptLogin = async function() {
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('main-app').style.display = 'flex';
             
-            // Load data from Supabase immediately after login
-            window.optimisticUpdate('central_stock_change');
+            // Load data from Supabase immediately after login (MUST WAIT for initial render)
+            await loadDataFromSupabase();
 
             document.querySelectorAll('.nav-btn, .nav-group-title, .nav-divider').forEach(el => {
                 if(el.hasAttribute('data-pharmacy-only')) {
