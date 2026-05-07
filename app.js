@@ -197,11 +197,11 @@ window.updateSyncStatus = function(status, msg) {
     }
 };
 
-async function syncUsers() {
+window.syncUsers = async function() {
     window.updateSyncStatus('syncing');
     try {
         console.log("Syncing user roles from Supabase...");
-        const { data, error } = await _supabase.from('users').select('id, email, role, pharmacy_id, name_ar, name_fr, recovery_email, recovery_phone');
+        const { data, error } = await _supabase.from('users').select('id, email, role, pharmacy_id, name_ar, name_fr');
         
         if (error) {
             console.error("Supabase Error:", error);
