@@ -1069,6 +1069,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     // Check Auto-Login Session immediately
     const performAutoLogin = async () => {
+        const loader = document.getElementById('global-loader');
         if (typeof _supabase !== 'undefined') {
             const loginBtn = document.querySelector('#login-form button[type="submit"]');
             if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'Chargement...'; }
@@ -1090,6 +1091,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         };
                         currentUser = window.userDatabase[email];
                         currentUserEmail = email;
+                        
+                        if(loader) loader.style.display = 'none';
                         document.getElementById('login-screen').style.display = 'none';
                         document.getElementById('main-app').style.display = 'flex';
                         await window.performLoginSuccess();
@@ -1102,6 +1105,12 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // If we reach here, auto-login didn't happen (no session or error)
             if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = currentLang === 'ar' ? 'تسجيل الدخول' : 'Connexion'; }
+            if(loader) loader.style.display = 'none';
+            document.getElementById('login-screen').style.display = 'flex';
+        } else {
+            // Supabase failed to load completely
+            if(loader) loader.style.display = 'none';
+            document.getElementById('login-screen').style.display = 'flex';
         }
     };
     performAutoLogin();
