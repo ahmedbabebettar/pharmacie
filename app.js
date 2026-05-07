@@ -1067,32 +1067,44 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('login-user').value = savedEmail;
         }
     }
-    // Check Auto-Login Session
-    setTimeout(async () => {
-        if (_supabase) {
-            const { data: { session } } = await _supabase.auth.getSession();
-            if (session && session.user) {
-                const email = session.user.email;
-                const { data: userData } = await _supabase.from('users').select('id, email, role, pharmacy_id, name_ar, name_fr').eq('email', email).maybeSingle();
-                if (userData) {
-                    let forcedRole = userData.role;
-                    if (userData.email.toLowerCase().trim() === 'stock@masef.com') forcedRole = 'manager';
-                    if (userData.email.toLowerCase().trim() === 'admin@masef.com') forcedRole = 'admin';
-                    window.userDatabase[email] = { 
-                        id: userData.id,
-                        role: forcedRole, 
-                        pharmacyId: userData.pharmacy_id,
-                        name: { ar: userData.name_ar, fr: userData.name_fr }
-                    };
-                    currentUser = window.userDatabase[email];
-                    currentUserEmail = email;
-                    document.getElementById('login-screen').style.display = 'none';
-                    document.getElementById('main-app').style.display = 'flex';
-                    await window.performLoginSuccess();
+    // Check Auto-Login Session immediately
+    const performAutoLogin = async () => {
+        if (typeof _supabase !== 'undefined') {
+            const loginBtn = document.querySelector('#login-form button[type="submit"]');
+            if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'Chargement...'; }
+            
+            try {
+                const { data: { session } } = await _supabase.auth.getSession();
+                if (session && session.user) {
+                    const email = session.user.email;
+                    const { data: userData } = await _supabase.from('users').select('id, email, role, pharmacy_id, name_ar, name_fr').eq('email', email).maybeSingle();
+                    if (userData) {
+                        let forcedRole = userData.role;
+                        if (userData.email.toLowerCase().trim() === 'stock@masef.com') forcedRole = 'manager';
+                        if (userData.email.toLowerCase().trim() === 'admin@masef.com') forcedRole = 'admin';
+                        window.userDatabase[email] = { 
+                            id: userData.id,
+                            role: forcedRole, 
+                            pharmacyId: userData.pharmacy_id,
+                            name: { ar: userData.name_ar, fr: userData.name_fr }
+                        };
+                        currentUser = window.userDatabase[email];
+                        currentUserEmail = email;
+                        document.getElementById('login-screen').style.display = 'none';
+                        document.getElementById('main-app').style.display = 'flex';
+                        await window.performLoginSuccess();
+                        return; // Auto-login successful
+                    }
                 }
+            } catch (e) {
+                console.error("Auto-login failed:", e);
             }
+            
+            // If we reach here, auto-login didn't happen (no session or error)
+            if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = currentLang === 'ar' ? 'تسجيل الدخول' : 'Connexion'; }
         }
-    }, 500);
+    };
+    performAutoLogin();
 
 }); // END of DOMContentLoaded
 
