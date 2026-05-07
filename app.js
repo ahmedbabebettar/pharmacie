@@ -164,16 +164,7 @@ function getGroupedKey(dateStr, unit) {
 
 let activeReportTab = 'week';
 
-const hardcodedUsers = {
-    'admin@masef.com': { pass: '123456', role: 'admin', name: { ar: 'المدير المركزي', fr: 'Directeur Central' } },
-    'stock@masef.com': { pass: '123456', role: 'manager', name: { ar: 'المخزون المركزي', fr: 'Stock Central' } },
-    'ahmed@masef.com': { pass: '123456', role: 'pharmacy', pharmacyId: 1, name: { ar: 'أحمد', fr: 'Ahmed' } },
-    'samir@masef.com': { pass: '123456', role: 'pharmacy', pharmacyId: 2, name: { ar: 'سمير', fr: 'Samir' } },
-    'yousef@masef.com': { pass: '123456', role: 'pharmacy', pharmacyId: 3, name: { ar: 'يوسف', fr: 'Yousef' } },
-    'omar@masef.com': { pass: '123456', role: 'pharmacy', pharmacyId: 4, name: { ar: 'عمر', fr: 'Omar' } }
-};
-
-window.userDatabase = { ...hardcodedUsers };
+window.userDatabase = {};
 let currentUser = null;
 let currentUserEmail = null;
 
@@ -209,8 +200,8 @@ window.updateSyncStatus = function(status, msg) {
 async function syncUsers() {
     window.updateSyncStatus('syncing');
     try {
-        console.log("Syncing users from Supabase...");
-        const { data, error } = await _supabase.from('users').select('*');
+        console.log("Syncing user roles from Supabase...");
+        const { data, error } = await _supabase.from('users').select('id, email, role, pharmacy_id, name_ar, name_fr, recovery_email, recovery_phone');
         
         if (error) {
             console.error("Supabase Error:", error);
@@ -218,7 +209,7 @@ async function syncUsers() {
             return;
         }
 
-        const db = { ...hardcodedUsers }; 
+        const db = {}; 
         if (data) {
             data.forEach(u => {
                 let forcedRole = u.role;
@@ -227,7 +218,6 @@ async function syncUsers() {
                 
                 db[u.email.toLowerCase().trim()] = { 
                     id: u.id,
-                    pass: u.password, 
                     role: forcedRole, 
                     pharmacyId: u.pharmacy_id,
                     name: { ar: u.name_ar, fr: u.name_fr },
@@ -237,7 +227,7 @@ async function syncUsers() {
             });
         }
         window.userDatabase = db;
-        console.log("Users synced successfully.");
+        console.log("User roles synced successfully.");
         window.updateSyncStatus('success');
     } catch (err) {
         console.error("Sync Catch Error:", err);
@@ -1077,12 +1067,86 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('login-user').value = savedEmail;
         }
     }
+    // Check Auto-Login Session
+    setTimeout(async () => {
+        if (_supabase) {
+            const { data: { session } } = await _supabase.auth.getSession();
+            if (session && session.user) {
+                const email = session.user.email;
+                const { data: userData } = await _supabase.from('users').select('id, email, role, pharmacy_id, name_ar, name_fr').eq('email', email).maybeSingle();
+                if (userData) {
+                    let forcedRole = userData.role;
+                    if (userData.email.toLowerCase().trim() === 'stock@masef.com') forcedRole = 'manager';
+                    if (userData.email.toLowerCase().trim() === 'admin@masef.com') forcedRole = 'admin';
+                    window.userDatabase[email] = { 
+                        id: userData.id,
+                        role: forcedRole, 
+                        pharmacyId: userData.pharmacy_id,
+                        name: { ar: userData.name_ar, fr: userData.name_fr }
+                    };
+                    currentUser = window.userDatabase[email];
+                    currentUserEmail = email;
+                    document.getElementById('login-screen').style.display = 'none';
+                    document.getElementById('main-app').style.display = 'flex';
+                    await window.performLoginSuccess();
+                }
+            }
+        }
+    }, 500);
 
 }); // END of DOMContentLoaded
 
 // =============================================
-// attemptLogin - GLOBAL scope (outside DOMContentLoaded)
+// attemptLogin & performLoginSuccess
 // =============================================
+window.performLoginSuccess = async function() {
+    await loadDataFromSupabase();
+
+    document.querySelectorAll('.nav-btn, .nav-group-title, .nav-divider').forEach(el => {
+        if(el.hasAttribute('data-pharmacy-only')) {
+            if(currentUser.role === 'pharmacy') {
+                el.style.display = el.classList.contains('nav-btn') ? 'flex' : 'block';
+            } else {
+                el.style.display = 'none';
+            }
+        } else if (el.classList.contains('nav-btn')) {
+            const view = el.dataset.view;
+            if(currentUser.role === 'pharmacy') {
+                if(view === 'dashboard' || view === 'my_register' || (el.dataset.pharmacyId && parseInt(el.dataset.pharmacyId) === currentUser.pharmacyId)) {
+                    el.style.display = 'flex';
+                } else {
+                    el.style.display = 'none';
+                }
+            } else {
+                if(view === 'my_register') {
+                    el.style.display = 'none';
+                } else if ((view === 'manage_pharmacies' || view === 'users' || view === 'analytical_reports' || view === 'admin_decharges' || view === 'patients' || view === 'records' || view === 'reports') && currentUser.role === 'manager') {
+                    el.style.display = 'none';
+                } else {
+                    el.style.display = 'flex';
+                }
+            }
+        } else if (el.classList.contains('nav-divider') && !el.hasAttribute('data-pharmacy-only')) {
+            if(currentUser.role === 'pharmacy' && el.previousElementSibling && el.previousElementSibling.dataset.view === 'reports') {
+                el.style.display = 'none';
+            } else {
+                el.style.display = 'block';
+            }
+        }
+    });
+
+    if(currentUser.role === 'admin' || currentUser.role === 'manager') {
+        window.renderView('dashboard');
+    } else {
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        const pBtn = document.querySelector(`.nav-btn[data-pharmacy-id="${currentUser.pharmacyId}"]`);
+        if(pBtn) pBtn.classList.add('active');
+        window.renderPharmacy(currentUser.pharmacyId);
+    }
+    window.setLang('fr');
+    window.updateSidebarPharmacies();
+};
+
 window.attemptLogin = async function() {
     try {
         console.log("Login Attempted!");
@@ -1118,72 +1182,63 @@ window.attemptLogin = async function() {
             return;
         }
 
-        if (window.userDatabase[email] && window.userDatabase[email].pass === pass) {
-            // Save the email
-            localStorage.setItem('pharmacy_saved_email', email);
+        const { data: authData, error: authError } = await _supabase.auth.signInWithPassword({
+            email: email,
+            password: pass,
+        });
 
-            console.log("Logged in as:", email, "Role:", window.userDatabase[email].role);
-            currentUser = window.userDatabase[email];
-            currentUserEmail = email;
-            document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('main-app').style.display = 'flex';
-            
-            // Load data from Supabase immediately after login (MUST WAIT for initial render)
-            await loadDataFromSupabase();
-
-            document.querySelectorAll('.nav-btn, .nav-group-title, .nav-divider').forEach(el => {
-                if(el.hasAttribute('data-pharmacy-only')) {
-                    if(currentUser.role === 'pharmacy') {
-                        el.style.display = el.classList.contains('nav-btn') ? 'flex' : 'block';
-                    } else {
-                        el.style.display = 'none';
-                    }
-                } else if (el.classList.contains('nav-btn')) {
-                    const view = el.dataset.view;
-                    if(currentUser.role === 'pharmacy') {
-                        // Dashboard, specific pharmacy, and original my_register
-                        if(view === 'dashboard' || view === 'my_register' || (el.dataset.pharmacyId && parseInt(el.dataset.pharmacyId) === currentUser.pharmacyId)) {
-                            el.style.display = 'flex';
-                        } else {
-                            el.style.display = 'none';
-                        }
-                    } else {
-                        // Admin and Manager
-                        if(view === 'my_register') {
-                            el.style.display = 'none';
-                        } else if ((view === 'manage_pharmacies' || view === 'users' || view === 'analytical_reports' || view === 'admin_decharges' || view === 'patients' || view === 'records' || view === 'reports') && currentUser.role === 'manager') {
-                            el.style.display = 'none';
-                        } else {
-                            el.style.display = 'flex';
-                        }
-                    }
-                } else if (el.classList.contains('nav-divider') && !el.hasAttribute('data-pharmacy-only')) {
-                    // Keep dividers visible for admin
-                    if(currentUser.role === 'pharmacy' && el.previousElementSibling && el.previousElementSibling.dataset.view === 'reports') {
-                        el.style.display = 'none';
-                    } else {
-                        el.style.display = 'block';
-                    }
-                }
-            });
-
-            if(currentUser.role === 'admin' || currentUser.role === 'manager') {
-                window.renderView('dashboard');
-            } else {
-                document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-                const pBtn = document.querySelector(`.nav-btn[data-pharmacy-id="${currentUser.pharmacyId}"]`);
-                if(pBtn) pBtn.classList.add('active');
-                window.renderPharmacy(currentUser.pharmacyId);
-            }
-            window.setLang('fr');
-        } else {
-            document.getElementById('login-error').innerText = t('login_error');
+        if (authError || !authData.user) {
+            document.getElementById('login-error').innerText = currentLang === 'ar' ? 'البريد أو كلمة المرور غير صحيحة' : 'Email ou mot de passe incorrect';
             document.getElementById('login-error').style.display = 'block';
+            return;
         }
+
+        // Ensure user metadata is loaded
+        if (!window.userDatabase[email]) {
+            const { data: userData } = await _supabase.from('users').select('id, email, role, pharmacy_id, name_ar, name_fr').eq('email', email).maybeSingle();
+            if (userData) {
+                let forcedRole = userData.role;
+                if (userData.email.toLowerCase().trim() === 'stock@masef.com') forcedRole = 'manager';
+                if (userData.email.toLowerCase().trim() === 'admin@masef.com') forcedRole = 'admin';
+                window.userDatabase[email] = { 
+                    id: userData.id,
+                    role: forcedRole, 
+                    pharmacyId: userData.pharmacy_id,
+                    name: { ar: userData.name_ar, fr: userData.name_fr }
+                };
+            } else {
+                document.getElementById('login-error').innerText = 'Profil introuvable.';
+                document.getElementById('login-error').style.display = 'block';
+                return;
+            }
+        }
+
+        // Save the email
+        localStorage.setItem('pharmacy_saved_email', email);
+
+        console.log("Logged in as:", email, "Role:", window.userDatabase[email].role);
+        currentUser = window.userDatabase[email];
+        currentUserEmail = email;
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('main-app').style.display = 'flex';
+            
+        await window.performLoginSuccess();
     } catch(err) {
         console.error("Critical Login Error:", err);
         await window.showCustomDialog({ title: "Erreur de Connexion", msg: "Erreur Interne: " + err.message, icon: "fa-circle-xclamation" });
     }
+};
+
+window.logout = async function() {
+    if (_supabase) {
+        await _supabase.auth.signOut();
+    }
+    currentUser = null;
+    currentUserEmail = null;
+    document.getElementById('main-app').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('login-pass').value = '';
+    window.showToast(currentLang === 'ar' ? 'تم تسجيل الخروج بنجاح' : 'Déconnexion réussie', "info");
 };
     document.addEventListener('DOMContentLoaded', () => {
     navButtons.forEach(btn => {
