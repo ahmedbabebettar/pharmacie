@@ -1231,10 +1231,7 @@ window.attemptLogin = async function() {
                 const { error } = await _supabase.from('medicines').update(medData).eq('id', isEditId);
                 if (error) throw error;
             } else {
-                // Fetch max ID to bypass Postgres sequence trap
-                const { data: maxRows } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1);
-                let currentId = (maxRows && maxRows.length > 0) ? parseInt(maxRows[0].id) : 0;
-                medData.id = currentId + 1;
+                // Let Postgres generate the ID using SERIAL/IDENTITY
 
                 const { error } = await _supabase.from('medicines').insert([medData]);
                 if (error) throw error;
@@ -4481,11 +4478,9 @@ window.addPharmacy = async function() {
     const color = await window.showCustomDialog({ title: "Couleur", msg: "Code couleur (ex: #047857):", type: 'prompt', defaultValue: "#047857", icon: 'fa-palette' });
 
     try {
-        const { data: maxRows } = await _supabase.from('pharmacies').select('id').order('id', { ascending: false }).limit(1);
-        const nextId = (maxRows && maxRows.length > 0) ? (parseInt(maxRows[0].id) + 1) : 1;
-
         const { error } = await _supabase.from('pharmacies').insert([{
-            id: nextId,
+            // Let Postgres generate ID
+
             name_fr: nameFr,
             name_ar: nameAr,
             color: color || "#047857"
@@ -5077,26 +5072,31 @@ window.restoreHospitalNationalStock = async function() {
             medMap[key] = m.id;
         });
 
-        const { data: maxIdRow } = await _supabase.from('medicines').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
-        let nextId = maxIdRow ? (parseInt(maxIdRow.id) + 1) : 5000;
-
         const newMeds = [];
         rows.forEach(r => {
             const key = `${r.name.toLowerCase().trim()}|${r.batch.toLowerCase().trim()}`;
             if (!medMap[key]) {
                 newMeds.push({
-                    id: nextId++,
+                    // Let Postgres generate ID
                     name: r.name,
                     batch: r.batch,
                     expiry_date: r.expiry,
                     qty: 0,
                     entry_date: new Date().toISOString().split('T')[0]
                 });
-                medMap[key] = nextId - 1;
+                // medMap will be updated after insert
+                medMap[key] = 'pending'; 
             }
         });
 
-        if (newMeds.length > 0) await _supabase.from('medicines').insert(newMeds);
+        if (newMeds.length > 0) {
+            const { data: insertedMeds, error: insertErr } = await _supabase.from('medicines').insert(newMeds).select();
+            if (insertErr) throw insertErr;
+            (insertedMeds || []).forEach(m => {
+                const key = `${m.name.toLowerCase().trim()}|${m.batch.toLowerCase().trim()}`;
+                medMap[key] = m.id;
+            });
+        }
 
         const stockUpserts = rows.map(r => ({
             pharmacy_id: 4,
