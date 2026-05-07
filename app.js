@@ -64,10 +64,10 @@ const staticDict = {
 };
 
 function isExpired(dateStr) {
-    if(!dateStr || dateStr === '-') return false;
+    if (!dateStr || dateStr === '-') return false;
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    
+
     const parts = dateStr.split(/[-/]/);
     let exp;
     if (parts.length === 3) {
@@ -81,20 +81,20 @@ function isExpired(dateStr) {
     } else {
         exp = new Date(dateStr);
     }
-    
+
     if (isNaN(exp.getTime())) return false;
     exp.setHours(0, 0, 0, 0);
     return exp < now;
 }
 
-window.formatDate = function(dateStr) {
+window.formatDate = function (dateStr) {
     if (!dateStr || dateStr === '-' || dateStr === 'undefined') return '-';
     if (typeof dateStr !== 'string') return dateStr;
     const justDate = dateStr.split('T')[0];
     const parts = justDate.split(/[-/]/);
     if (parts.length === 3) {
         if (parts[0].length === 4) { // YYYY-MM-DD
-            const y = parts[0], m = parts[1].padStart(2,'0'), d = parts[2].padStart(2,'0');
+            const y = parts[0], m = parts[1].padStart(2, '0'), d = parts[2].padStart(2, '0');
             return `${d}/${m}/${y}`;
         }
         if (parts[2].length === 4) { // DD/MM/YYYY
@@ -104,8 +104,8 @@ window.formatDate = function(dateStr) {
     }
     return dateStr;
 };
- 
-window.formatReportPeriod = function(pKey, timeframe) {
+
+window.formatReportPeriod = function (pKey, timeframe) {
     if (!pKey || pKey === '-' || pKey === 'undefined') return '-';
     if (timeframe === 'day') return window.formatDate(pKey);
     if (timeframe === 'week') {
@@ -131,9 +131,9 @@ window.formatReportPeriod = function(pKey, timeframe) {
 };
 
 // Utility: Debounce
-window.debounce = function(func, wait) {
+window.debounce = function (func, wait) {
     let timeout;
-    return function(...args) {
+    return function (...args) {
         clearTimeout(timeout);
         timeout = setTimeout(() => func.apply(this, args), wait);
     };
@@ -173,13 +173,13 @@ let usersReadyResolve;
 window.usersReady = new Promise(resolve => { usersReadyResolve = resolve; });
 
 // --- Global Sync Status Manager ---
-window.updateSyncStatus = function(status, msg) {
+window.updateSyncStatus = function (status, msg) {
     const indicator = document.getElementById('sync-status-indicator');
     const text = document.getElementById('sync-stat-text');
     if (!indicator || !text) return;
 
     indicator.classList.remove('syncing', 'success', 'error');
-    
+
     if (status === 'syncing') {
         indicator.classList.add('syncing');
         text.innerText = msg || (currentLang === 'ar' ? 'جاري المزامنة...' : 'Synchronisation...');
@@ -197,28 +197,28 @@ window.updateSyncStatus = function(status, msg) {
     }
 };
 
-window.syncUsers = async function() {
+window.syncUsers = async function () {
     window.updateSyncStatus('syncing');
     try {
         console.log("Syncing user roles from Supabase...");
         const { data, error } = await _supabase.from('users').select('id, email, role, pharmacy_id, name_ar, name_fr');
-        
+
         if (error) {
             console.error("Supabase Error:", error);
             window.updateSyncStatus('error', currentLang === 'ar' ? 'خطأ في السحاب' : 'Erreur Cloud');
             return;
         }
 
-        const db = {}; 
+        const db = {};
         if (data) {
             data.forEach(u => {
                 let forcedRole = u.role;
                 if (u.email.toLowerCase().trim() === 'stock@masef.com') forcedRole = 'manager';
                 if (u.email.toLowerCase().trim() === 'admin@masef.com') forcedRole = 'admin';
-                
-                db[u.email.toLowerCase().trim()] = { 
+
+                db[u.email.toLowerCase().trim()] = {
                     id: u.id,
-                    role: forcedRole, 
+                    role: forcedRole,
                     pharmacyId: u.pharmacy_id,
                     name: { ar: u.name_ar, fr: u.name_fr },
                     recoveryEmail: u.recovery_email,
@@ -247,11 +247,11 @@ function saveSettings() {
     localStorage.setItem('pharmacy_lang', 'fr');
 }
 
-window.parseWorkerName = function(val, lang = 'fr') {
+window.parseWorkerName = function (val, lang = 'fr') {
     if (!val) return '-';
     if (typeof val === 'object') return val[lang] || '-';
     if (typeof val === 'string' && val.startsWith('{')) {
-        try { const obj = JSON.parse(val); return obj[lang] || '-'; } catch(e){}
+        try { const obj = JSON.parse(val); return obj[lang] || '-'; } catch (e) { }
     }
     return val;
 };
@@ -267,7 +267,7 @@ function updateStaticTranslations() {
 }
 
 // Toast Notification System
-window.showToast = function(message, type = 'success') {
+window.showToast = function (message, type = 'success') {
     let container = document.getElementById('toast-container');
     if (!container) {
         container = document.createElement('div');
@@ -279,7 +279,7 @@ window.showToast = function(message, type = 'success') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     const icon = type === 'success' ? 'fa-circle-check' : 'fa-circle-xmark';
-    
+
     toast.innerHTML = `
         <i class="fa-solid ${icon}"></i>
         <span>${message}</span>
@@ -294,7 +294,7 @@ window.showToast = function(message, type = 'success') {
     }, 3000);
 };
 
-window.setLang = function(lang) {
+window.setLang = function (lang) {
     currentLang = lang;
     saveSettings();
     document.documentElement.lang = lang;
@@ -306,7 +306,7 @@ const SUPABASE_URL = 'https://spargooprxgbxqmiopjz.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_uEvawosIK3GP1u8U1eugyQ_AKWWo1Ma';
 
 // Custom Dialog System (Replaces alert, prompt, confirm)
-window.showCustomDialog = function({ title, msg, type = 'alert', defaultValue = '', icon = 'fa-circle-info' }) {
+window.showCustomDialog = function ({ title, msg, type = 'alert', defaultValue = '', icon = 'fa-circle-info' }) {
     return new Promise((resolve) => {
         const modal = document.getElementById('custom-dialog-modal');
         const titleEl = document.getElementById('dialog-title');
@@ -320,9 +320,9 @@ window.showCustomDialog = function({ title, msg, type = 'alert', defaultValue = 
         titleEl.innerText = title;
         msgEl.innerText = msg;
         iconContainer.innerHTML = `<i class="fa-solid ${icon}"></i>`;
-        
+
         // Smarter contextual colors
-        iconContainer.className = ''; 
+        iconContainer.className = '';
         const iconLower = icon.toLowerCase();
         if (iconLower.includes('check') || iconLower.includes('good') || iconLower.includes('success')) iconContainer.classList.add('success');
         else if (iconLower.includes('xmark') || iconLower.includes('exclamation') || iconLower.includes('error')) iconContainer.classList.add('error');
@@ -382,10 +382,10 @@ const _db = _supabase;
 const defaultState = {
     medicines: [],
     pharmacies: {
-        1: { name: {ar: 'صيدلية النصر', fr: 'Pharmacie Nasr'}, patients: 0, percent: 0, color: '#047857', stock: [] },
-        2: { name: {ar: 'صيدلية الأمل', fr: 'Pharmacie Amal'}, patients: 0, percent: 0, color: '#d97706', stock: [] },
-        3: { name: {ar: 'صيدلية الشفاء', fr: 'Pharmacie Chifa'}, patients: 0, percent: 0, color: '#ef4444', stock: [] },
-        4: { name: {ar: 'صيدلية الرحمة', fr: 'Pharmacie Rahma'}, patients: 0, percent: 0, color: '#047857', stock: [] }
+        1: { name: { ar: 'صيدلية النصر', fr: 'Pharmacie Nasr' }, patients: 0, percent: 0, color: '#047857', stock: [] },
+        2: { name: { ar: 'صيدلية الأمل', fr: 'Pharmacie Amal' }, patients: 0, percent: 0, color: '#d97706', stock: [] },
+        3: { name: { ar: 'صيدلية الشفاء', fr: 'Pharmacie Chifa' }, patients: 0, percent: 0, color: '#ef4444', stock: [] },
+        4: { name: { ar: 'صيدلية الرحمة', fr: 'Pharmacie Rahma' }, patients: 0, percent: 0, color: '#047857', stock: [] }
     },
     transfers: [],
     dispensations: [],
@@ -502,7 +502,7 @@ async function loadDataFromSupabase() {
     try {
         window.updateSyncStatus('syncing');
         console.log("Fetching configuration from Supabase...");
-        
+
         // Fetch small config tables and global counts
         const [pharms, counters, returns, totalMeds, totalPats, totalTrans, totalDisps, totalExpired, totalLow] = await Promise.all([
             _supabase.from('pharmacies').select('*'),
@@ -519,7 +519,7 @@ async function loadDataFromSupabase() {
         // SCALABILITY: Get real sums for the dashboard using RPC if possible
         let sumMeds = 0;
         const { data: rpcSum, error: rpcErr } = await _supabase.rpc('get_total_stock');
-        
+
         if (!rpcErr && rpcSum !== null) {
             sumMeds = parseInt(rpcSum);
         } else {
@@ -570,7 +570,7 @@ async function loadDataFromSupabase() {
         // SCALABILITY: Fetch pharmacy activity stats (patient counts and percentages)
         // RPC is now mandatory to prevent N sequential requests
         const { data: activityData } = await _supabase.rpc('get_pharmacy_stats');
-        
+
         if (activityData) {
             activityData.forEach(row => {
                 if (state.pharmacies[row.pharmacy_id]) {
@@ -586,9 +586,9 @@ async function loadDataFromSupabase() {
         // Fetch recent transfers for dashboard
         const { data: recentTrans } = await _supabase.from('transfers').select('*').order('date', { ascending: false }).limit(6);
         state.transfers = recentTrans ? recentTrans.map(t => ({
-            id: t.id, date: t.date.split('T')[0], medName: t.medicine_name, 
-            qty: t.qty, toPharmacy: t.to_pharmacy_id, isReturn: t.is_return, 
-            dispensedBy: t.dispensed_by 
+            id: t.id, date: t.date.split('T')[0], medName: t.medicine_name,
+            qty: t.qty, toPharmacy: t.to_pharmacy_id, isReturn: t.is_return,
+            dispensedBy: t.dispensed_by
         })) : [];
 
         // Fetch pending orders (OPTIMIZED: Only fetch PENDING to avoid massive payloads)
@@ -604,10 +604,10 @@ async function loadDataFromSupabase() {
 }
 
 // Optimistic State Update Helper
-window.optimisticUpdate = function(action, payload = {}) {
+window.optimisticUpdate = function (action, payload = {}) {
     if (!state.stats) return;
 
-    switch(action) {
+    switch (action) {
         case 'order_added':
             state.counters.order = (state.counters.order || 0) + 1;
             state.orders.push({
@@ -643,7 +643,7 @@ window.optimisticUpdate = function(action, payload = {}) {
         case 'transfer_added':
             state.stats.totalDistributions = (state.stats.totalDistributions || 0) + 1;
             state.transfers.unshift(payload);
-            if(state.transfers.length > 6) state.transfers.pop();
+            if (state.transfers.length > 6) state.transfers.pop();
             break;
         case 'central_stock_change':
             // For complex central stock changes, trigger background reload and then update UI
@@ -652,9 +652,9 @@ window.optimisticUpdate = function(action, payload = {}) {
                     window.renderView('dashboard');
                 }
             });
-            return; 
+            return;
     }
-    
+
     window.updateSidebarPharmacies();
     // Refresh dashboard instantly if active
     if (typeof activeView !== 'undefined' && activeView === 'dashboard') {
@@ -665,10 +665,10 @@ window.optimisticUpdate = function(action, payload = {}) {
 
 
 // PATCH MARKER START - BULLETPROOF importPharmacyStock
-window.importPharmacyStock = async function(event, pharmId) {
+window.importPharmacyStock = async function (event, pharmId) {
     const file = event.target.files[0];
-    if(!file) return;
-    
+    if (!file) return;
+
     const confirmClear = await window.showCustomDialog({
         title: currentLang === "ar" ? "تأكيد عملية الاستيراد" : "Confirmation d'importation",
         msg: currentLang === "ar" ? "سيتم تحديث كميات الأدوية في هذه الصيدلية. هل أنت متأكد؟" : "Le stock de cette pharmacie sera mis à jour. Continuer ?",
@@ -679,15 +679,15 @@ window.importPharmacyStock = async function(event, pharmId) {
 
     window.showToast("Analyse du fichier...", "info");
     const reader = new FileReader();
-    reader.onload = async function(evt) {
+    reader.onload = async function (evt) {
         try {
             const data = evt.target.result;
-            const workbook = XLSX.read(data, {type: 'binary'});
+            const workbook = XLSX.read(data, { type: 'binary' });
             const firstSheet = workbook.SheetNames[0];
             const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1, defval: '' });
-            
+
             if (rawRows.length === 0) { window.showToast("Fichier vide.", "error"); return; }
-            
+
             let nameIdx = -1, batchIdx = -1, qtyIdx = -1, expIdx = -1, startIndex = 0;
             const firstRow = rawRows[0];
             for (let i = 0; i < firstRow.length; i++) {
@@ -765,7 +765,7 @@ window.importPharmacyStock = async function(event, pharmId) {
             // Step 2: Update Stock (Additive / Merge)
             // CRITICAL FIX: We NO LONGER delete all stock before import.
             // This preserves distributions from Central Stock that might not be in the Excel file.
-            
+
             const stockUpserts = processedRows.map(row => {
                 const key = `${row.name.toLowerCase()}|${row.batch.toLowerCase()}`;
                 const medId = medMap[key];
@@ -794,28 +794,28 @@ window.importPharmacyStock = async function(event, pharmId) {
 // =============================================
 // COUNTER LOGIC
 // =============================================
-window.getNextCounterValue = async function(type) {
+window.getNextCounterValue = async function (type) {
     try {
         const { data, error } = await _supabase
             .from('app_counters')
             .select('value')
             .eq('id', type)
             .single();
-        
+
         if (error) throw error;
-        
+
         const newValue = (data.value || 0) + 1;
-        
+
         const { error: updateError } = await _supabase
             .from('app_counters')
             .update({ value: newValue, updated_at: new Date().toISOString() })
             .eq('id', type);
-            
+
         if (updateError) throw updateError;
-        
+
         // Update local state
         state.counters[type] = newValue;
-        
+
         let prefix = 'TRN';
         if (type === 'delivery') prefix = 'BL';
         if (type === 'order') prefix = 'BC';
@@ -831,14 +831,14 @@ window.getNextCounterValue = async function(type) {
     }
 };
 
-window.resetCounters = async function() {
-    const confirm = await window.showCustomDialog({ 
-        title: "Réinitialisation", 
-        msg: "Voulez-vous vraiment remettre les compteurs à ZERO (0001) ?", 
-        type: 'confirm', 
-        icon: 'fa-rotate' 
+window.resetCounters = async function () {
+    const confirm = await window.showCustomDialog({
+        title: "Réinitialisation",
+        msg: "Voulez-vous vraiment remettre les compteurs à ZERO (0001) ?",
+        type: 'confirm',
+        icon: 'fa-rotate'
     });
-    
+
     if (confirm) {
         try {
             await _supabase.from('app_counters').update({ value: 0 }).in('id', ['delivery', 'order', 'dispense']);
@@ -851,7 +851,7 @@ window.resetCounters = async function() {
     }
 };
 
-window.migrateLocalData = async function() {
+window.migrateLocalData = async function () {
     const localData = localStorage.getItem('pharmacy_inventory_state');
     if (!localData) {
         window.showToast("Aucune donnée locale à migrer.", "info");
@@ -874,9 +874,9 @@ window.migrateLocalData = async function() {
                 };
             });
             // Chunking to be safe if there are too many meds
-            for(let i = 0; i < meds.length; i += 1000) {
+            for (let i = 0; i < meds.length; i += 1000) {
                 const res = await _supabase.from('medicines').upsert(meds.slice(i, i + 1000));
-                if(res.error) {
+                if (res.error) {
                     console.error("Migration error meds:", res.error);
                 }
             }
@@ -887,7 +887,7 @@ window.migrateLocalData = async function() {
             const pats = localState.patients.map(p => ({
                 id: p.id, name: p.name, national_id: p.nationalId, phone: p.phone, hospital: p.hospital
             }));
-            for(let i = 0; i < pats.length; i += 1000) {
+            for (let i = 0; i < pats.length; i += 1000) {
                 await _supabase.from('patients').upsert(pats.slice(i, i + 1000));
             }
         }
@@ -898,7 +898,7 @@ window.migrateLocalData = async function() {
                 id: t.id, date: t.date, medicine_id: t.medId, medicine_name: t.medName,
                 qty: t.qty, to_pharmacy_id: t.toPharmacy, is_return: !!t.isReturn, dispensed_by: t.dispensedBy || 'System'
             }));
-            for(let i = 0; i < trans.length; i += 1000) {
+            for (let i = 0; i < trans.length; i += 1000) {
                 await _supabase.from('transfers').upsert(trans.slice(i, i + 1000));
             }
         }
@@ -906,10 +906,10 @@ window.migrateLocalData = async function() {
         // 3. Migrate Dispensations
         if (localState.dispensations && localState.dispensations.length > 0) {
             const disps = localState.dispensations.map(d => ({
-                id: d.id, date: d.date, patient_name: d.patientName, 
+                id: d.id, date: d.date, patient_name: d.patientName,
                 medicine_name: d.medName, qty: d.qty, pharmacy_id: d.pharmacyId, dispensed_by: d.dispensedBy
             }));
-            for(let i = 0; i < disps.length; i += 1000) {
+            for (let i = 0; i < disps.length; i += 1000) {
                 await _supabase.from('dispensations').upsert(disps.slice(i, i + 1000));
             }
         }
@@ -917,10 +917,10 @@ window.migrateLocalData = async function() {
         // 4. Migrate Orders
         if (localState.orders && localState.orders.length > 0) {
             const ords = localState.orders.map(o => ({
-                id: o.id, date: o.date, pharmacy_id: o.pharmacyId, 
+                id: o.id, date: o.date, pharmacy_id: o.pharmacyId,
                 worker_name: o.workerName, status: o.status, items: o.items
             }));
-            for(let i = 0; i < ords.length; i += 1000) {
+            for (let i = 0; i < ords.length; i += 1000) {
                 await _supabase.from('orders').upsert(ords.slice(i, i + 1000));
             }
         }
@@ -932,7 +932,7 @@ window.migrateLocalData = async function() {
                 const stocks = p.stock.map(s => ({
                     pharmacy_id: parseInt(pid), medicine_id: s.id, qty: s.qty
                 }));
-                for(let i = 0; i < stocks.length; i += 1000) {
+                for (let i = 0; i < stocks.length; i += 1000) {
                     await _supabase.from('pharmacy_stock').upsert(stocks.slice(i, i + 1000), { onConflict: 'pharmacy_id,medicine_id' });
                 }
             }
@@ -940,7 +940,7 @@ window.migrateLocalData = async function() {
         // 6. Migrate Users (Accounts)
         let localUsers = localState.users || localState.userDatabase || JSON.parse(localStorage.getItem('user_database') || '{}');
         const usersToMigrate = [];
-        
+
         // Handle both Array and Object formats for legacy data
         if (Array.isArray(localUsers)) {
             localUsers.forEach(u => {
@@ -983,7 +983,7 @@ window.migrateLocalData = async function() {
     }
 }
 
-window.downloadLocalBackup = async function() {
+window.downloadLocalBackup = async function () {
     const localData = localStorage.getItem('pharmacy_inventory_state');
     if (!localData) {
         await window.showCustomDialog({ title: "Données Locales", msg: "Aucune donnée locale trouvée.", icon: "fa-folder-open" });
@@ -1005,16 +1005,16 @@ async function saveState() {
     // I will refactor mutation functions to call _supabase directly.
 }
 
-window.exportCentralStockToExcel = async function() {
+window.exportCentralStockToExcel = async function () {
     window.showToast("Préparation du fichier Excel...", "info");
-    
+
     // Scalability: Fetch top 5000 records for export (fetching millions would crash the browser)
     const { data: meds, error } = await _supabase.from('medicines')
         .select('*')
         .order('name', { ascending: true })
         .limit(5000);
 
-    if(error || !meds || meds.length === 0) {
+    if (error || !meds || meds.length === 0) {
         window.showToast(currentLang === 'ar' ? 'المخزون فارغ أو حدث خطأ.' : 'Le stock est vide ou une erreur est survenue.', 'error');
         return;
     }
@@ -1022,12 +1022,12 @@ window.exportCentralStockToExcel = async function() {
     if (meds.length === 5000) {
         window.showToast("Note: Export limité aux 5000 premiers articles pour la performance.", "warning");
     }
-    
+
     const dataToExport = meds.map(m => {
         let statusText = currentLang === 'ar' ? 'جيد' : 'Bon';
         if (m.qty === 0) statusText = currentLang === 'ar' ? 'نافذ' : 'Rupture';
         else if (m.qty < 50) statusText = currentLang === 'ar' ? 'ضعيف' : 'Faible';
-    
+
         return {
             "ID (Système)": m.id,
             [currentLang === 'ar' ? 'الدواء' : 'Médicament']: m.name,
@@ -1043,7 +1043,7 @@ window.exportCentralStockToExcel = async function() {
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, currentLang === 'ar' ? "المخزون" : "Stock Central");
-    
+
     const dateStr = new Date().toISOString().split('T')[0];
     XLSX.writeFile(wb, `Stock_Central_${dateStr}.xlsx`);
     window.showToast(currentLang === 'ar' ? 'تم تصدير ملف Excel بنجاح!' : "Export Excel réussi !");
@@ -1061,9 +1061,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Login Logic - Load saved email if available
     const loginForm = document.getElementById('login-form');
-    if(loginForm) {
+    if (loginForm) {
         const savedEmail = localStorage.getItem('pharmacy_saved_email');
-        if(savedEmail) {
+        if (savedEmail) {
             document.getElementById('login-user').value = savedEmail;
         }
     }
@@ -1072,7 +1072,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof _supabase !== 'undefined') {
             const loginBtn = document.querySelector('#login-form button[type="submit"]');
             if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'Chargement...'; }
-            
+
             try {
                 const { data: { session } } = await _supabase.auth.getSession();
                 if (session && session.user) {
@@ -1094,7 +1094,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (e) {
                 console.error("Auto-login failed:", e);
             }
-            
+
             // If we reach here, auto-login didn't happen (no session or error)
             if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = currentLang === 'ar' ? 'تسجيل الدخول' : 'Connexion'; }
         }
@@ -1106,26 +1106,26 @@ document.addEventListener('DOMContentLoaded', () => {
 // =============================================
 // attemptLogin & performLoginSuccess
 // =============================================
-window.performLoginSuccess = async function() {
+window.performLoginSuccess = async function () {
     await loadDataFromSupabase();
 
     document.querySelectorAll('.nav-btn, .nav-group-title, .nav-divider').forEach(el => {
-        if(el.hasAttribute('data-pharmacy-only')) {
-            if(currentUser.role === 'pharmacy') {
+        if (el.hasAttribute('data-pharmacy-only')) {
+            if (currentUser.role === 'pharmacy') {
                 el.style.display = el.classList.contains('nav-btn') ? 'flex' : 'block';
             } else {
                 el.style.display = 'none';
             }
         } else if (el.classList.contains('nav-btn')) {
             const view = el.dataset.view;
-            if(currentUser.role === 'pharmacy') {
-                if(view === 'dashboard' || view === 'my_register' || (el.dataset.pharmacyId && parseInt(el.dataset.pharmacyId) === currentUser.pharmacyId)) {
+            if (currentUser.role === 'pharmacy') {
+                if (view === 'dashboard' || view === 'my_register' || (el.dataset.pharmacyId && parseInt(el.dataset.pharmacyId) === currentUser.pharmacyId)) {
                     el.style.display = 'flex';
                 } else {
                     el.style.display = 'none';
                 }
             } else {
-                if(view === 'my_register') {
+                if (view === 'my_register') {
                     el.style.display = 'none';
                 } else if ((view === 'manage_pharmacies' || view === 'users' || view === 'analytical_reports' || view === 'admin_decharges' || view === 'patients' || view === 'records' || view === 'reports') && currentUser.role === 'manager') {
                     el.style.display = 'none';
@@ -1134,7 +1134,7 @@ window.performLoginSuccess = async function() {
                 }
             }
         } else if (el.classList.contains('nav-divider') && !el.hasAttribute('data-pharmacy-only')) {
-            if(currentUser.role === 'pharmacy' && el.previousElementSibling && el.previousElementSibling.dataset.view === 'reports') {
+            if (currentUser.role === 'pharmacy' && el.previousElementSibling && el.previousElementSibling.dataset.view === 'reports') {
                 el.style.display = 'none';
             } else {
                 el.style.display = 'block';
@@ -1142,22 +1142,22 @@ window.performLoginSuccess = async function() {
         }
     });
 
-    if(currentUser.role === 'admin' || currentUser.role === 'manager') {
+    if (currentUser.role === 'admin' || currentUser.role === 'manager') {
         window.renderView('dashboard');
     } else {
         document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
         const pBtn = document.querySelector(`.nav-btn[data-pharmacy-id="${currentUser.pharmacyId}"]`);
-        if(pBtn) pBtn.classList.add('active');
+        if (pBtn) pBtn.classList.add('active');
         window.renderPharmacy(currentUser.pharmacyId);
     }
     window.setLang('fr');
     window.updateSidebarPharmacies();
 };
 
-window.attemptLogin = async function() {
+window.attemptLogin = async function () {
     try {
         console.log("Login Attempted!");
-        
+
         const loginBtn = document.querySelector('#login-form button[type="submit"]');
         if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'Vérification...'; }
 
@@ -1165,7 +1165,7 @@ window.attemptLogin = async function() {
         if (_supabase) {
             try {
                 await syncUsers();
-            } catch(syncErr) {
+            } catch (syncErr) {
                 console.warn("syncUsers failed, using local credentials:", syncErr);
             }
         } else {
@@ -1207,9 +1207,9 @@ window.attemptLogin = async function() {
                 let forcedRole = userData.role;
                 if (userData.email.toLowerCase().trim() === 'stock@masef.com') forcedRole = 'manager';
                 if (userData.email.toLowerCase().trim() === 'admin@masef.com') forcedRole = 'admin';
-                window.userDatabase[email] = { 
+                window.userDatabase[email] = {
                     id: userData.id,
-                    role: forcedRole, 
+                    role: forcedRole,
                     pharmacyId: userData.pharmacy_id,
                     name: { ar: userData.name_ar, fr: userData.name_fr }
                 };
@@ -1228,31 +1228,28 @@ window.attemptLogin = async function() {
         currentUserEmail = email;
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('main-app').style.display = 'flex';
-            
+
         await window.performLoginSuccess();
-    } catch(err) {
+    } catch (err) {
         console.error("Critical Login Error:", err);
         await window.showCustomDialog({ title: "Erreur de Connexion", msg: "Erreur Interne: " + err.message, icon: "fa-circle-xclamation" });
     }
 };
 
-window.logout = async function() {
+window.logout = async function () {
     if (_supabase) {
         await _supabase.auth.signOut();
     }
-    currentUser = null;
-    currentUserEmail = null;
-    document.getElementById('main-app').style.display = 'none';
-    document.getElementById('login-screen').style.display = 'flex';
-    document.getElementById('login-pass').value = '';
-    window.showToast(currentLang === 'ar' ? 'تم تسجيل الخروج بنجاح' : 'Déconnexion réussie', "info");
+    // Clear everything and reload to ensure a fresh state
+    localStorage.removeItem('pharmacy_saved_email'); // Optional: force re-entry of email if desired
+    window.location.reload();
 };
-    document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', () => {
     navButtons.forEach(btn => {
         btn.addEventListener('click', async (e) => {
             navButtons.forEach(b => b.classList.remove('active'));
             e.currentTarget.classList.add('active');
-            
+
             const view = e.currentTarget.dataset.view;
             if (view && view.startsWith('pharmacy-')) {
                 await window.renderPharmacy(e.currentTarget.dataset.pharmacyId, 'all');
@@ -1282,14 +1279,14 @@ window.logout = async function() {
         const price = parseFloat(document.getElementById('med-price').value) || 0;
 
         const isEditId = document.getElementById('add-medicine-form').dataset.editId;
-        const medData = { 
+        const medData = {
             name, batch, qty, price,
-            entry_date: (entryDate && entryDate !== '-') ? entryDate : null, 
-            expiry_date: (expiry && expiry !== '-') ? expiry : null 
+            entry_date: (entryDate && entryDate !== '-') ? entryDate : null,
+            expiry_date: (expiry && expiry !== '-') ? expiry : null
         };
 
         try {
-            if(isEditId) {
+            if (isEditId) {
                 const { error } = await _supabase.from('medicines').update(medData).eq('id', isEditId);
                 if (error) throw error;
             } else {
@@ -1298,14 +1295,14 @@ window.logout = async function() {
                 const { error } = await _supabase.from('medicines').insert([medData]);
                 if (error) throw error;
             }
-            
+
             window.optimisticUpdate('central_stock_change'); // Reload global state
             showToast("Médicament enregistré avec succès");
-            
+
             addMedModal.classList.remove('active');
             addMedForm.reset();
             document.getElementById('add-medicine-form').removeAttribute('data-edit-id');
-            window.renderView('central'); 
+            window.renderView('central');
         } catch (err) {
             console.error("Error saving medicine:", err);
         }
@@ -1313,13 +1310,13 @@ window.logout = async function() {
 
     // 2. Recovery Form Listener
     const recoveryForm = document.getElementById('recovery-form');
-    if(recoveryForm) {
+    if (recoveryForm) {
         recoveryForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const recovEmail = document.getElementById('recov-email').value.trim();
             const recovPhone = document.getElementById('recov-phone').value.trim();
-            
-            if(!currentUserEmail) {
+
+            if (!currentUserEmail) {
                 await window.showCustomDialog({ title: "Session Expirée", msg: "Erreur de session. Veuillez vous reconnecter.", icon: "fa-user-lock" });
                 return;
             }
@@ -1336,8 +1333,8 @@ window.logout = async function() {
                 if (error) {
                     console.error("Erreur de sauvegarde de sécurité:", error);
                     let errDetails = error.message;
-                    if(error.code === '42P01') errDetails = "La table 'user_security' n'existe pas.";
-                    if(error.code === '42501') errDetails = "Accès refusé. Veuillez désactiver le 'Row Level Security' (RLS) pour cette table dans Supabase.";
+                    if (error.code === '42P01') errDetails = "La table 'user_security' n'existe pas.";
+                    if (error.code === '42501') errDetails = "Accès refusé. Veuillez désactiver le 'Row Level Security' (RLS) pour cette table dans Supabase.";
                     await window.showCustomDialog({ title: "Erreur Supabase", msg: errDetails, icon: "fa-database" });
                     showToast("Action requise: Assurez-vous que la table 'user_security' est bien créée et RLS désactivé.", "error");
                 } else {
@@ -1351,31 +1348,31 @@ window.logout = async function() {
         });
     }
 
-    window.forgotPassword = async function() {
-        const email = await window.showCustomDialog({ 
+    window.forgotPassword = async function () {
+        const email = await window.showCustomDialog({
             title: currentLang === 'ar' ? 'استعادة الحساب' : 'Récupération',
             msg: currentLang === 'ar' ? 'أدخل إيميل الدخول الخاص بك:' : 'Entrez votre email de connexion :',
             type: 'prompt',
             icon: 'fa-user-lock'
         });
-        if(!email) return;
-        
+        if (!email) return;
+
         try {
             const { data, error } = await _supabase.from('user_security').select('*').eq('login_email', email.toLowerCase().trim()).single();
             if (error || !data) {
-                window.showCustomDialog({ 
+                window.showCustomDialog({
                     title: "Oups",
                     msg: currentLang === 'ar' ? 'لم يتم العثور على معلومات استرجاع لهذا الحساب.' : 'Aucune information de récupération trouvée.',
                     icon: 'fa-circle-exclamation'
                 });
             } else {
                 const mask = (str) => {
-                    if(!str) return '---';
+                    if (!str) return '---';
                     const parts = str.split('@');
-                    if(parts.length === 2) return parts[0].substring(0,2) + '***@' + parts[1];
-                    return str.substring(0,4) + '****';
+                    if (parts.length === 2) return parts[0].substring(0, 2) + '***@' + parts[1];
+                    return str.substring(0, 4) + '****';
                 };
-                window.showCustomDialog({ 
+                window.showCustomDialog({
                     title: currentLang === 'ar' ? 'معلومات الاستعادة' : 'Infos Récupération',
                     msg: (currentLang === 'ar' ? 'الإيميل:' : 'Email:') + ' ' + mask(data.recovery_email) + '\n' + (currentLang === 'ar' ? 'الهاتف:' : 'Tél:') + ' ' + mask(data.recovery_phone),
                     icon: 'fa-user-shield'
@@ -1384,14 +1381,14 @@ window.logout = async function() {
         } catch (err) { console.error(err); }
     };
 
-    window.openRecoveryModal = async function() {
-        if(!currentUser) return;
+    window.openRecoveryModal = async function () {
+        if (!currentUser) return;
         document.getElementById('recovery-modal').classList.add('active');
-        
+
         // Try to pre-load existing data
         const loginEmail = Object.keys(userDatabase).find(k => userDatabase[k] === currentUser);
         const { data } = await _supabase.from('user_security').select('*').eq('login_email', loginEmail).single();
-        if(data) {
+        if (data) {
             document.getElementById('recov-email').value = data.recovery_email || '';
             document.getElementById('recov-phone').value = data.recovery_phone || '';
         }
@@ -1401,11 +1398,11 @@ window.logout = async function() {
 }); // END of second DOMContentLoaded
 
 // Unified changePage: handles both generic views and pharmacy-specific views
-window.changePage = function(view, page) {
+window.changePage = function (view, page) {
     if (!pagination[view]) return;
     pagination[view].currentPage = page;
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    
+
     // Pharmacy-specific pagination needs renderPharmacy, not renderView
     if ((view.startsWith('pharmacy_') || view === 'dispensations') && window.activePharmacyId) {
         window.renderPharmacy(window.activePharmacyId, window.activeSubView || 'all');
@@ -1448,7 +1445,7 @@ function renderPaginationControls(view, totalItems) {
     `;
 }
 
-window.renderView = async function(viewName) {
+window.renderView = async function (viewName) {
     activeView = viewName;
     const viewContainer = document.getElementById('view-container');
     const pageTitle = document.getElementById('page-title');
@@ -1465,17 +1462,17 @@ window.renderView = async function(viewName) {
     // Show loading indicator
     viewContainer.innerHTML = `<div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:100px; color:var(--primary-brand);">
         <i class="fa-solid fa-circle-notch fa-spin" style="font-size:3rem; margin-bottom:15px;"></i>
-        <p style="font-weight:600;">${currentLang==='ar'?'جاري جلب البيانات...':'Chargement des données...'}</p>
+        <p style="font-weight:600;">${currentLang === 'ar' ? 'جاري جلب البيانات...' : 'Chargement des données...'}</p>
     </div>`;
 
-    
-    
+
+
     if (viewName === 'dashboard') {
         pageTitle.innerText = t('page_dashboard');
-        
+
         // Scalability: Get counts from state.stats instead of full array
         const totalCentralCount = state.stats.totalMeds || 0;
-        
+
         // Fetch one sample low stock item for the alert bar if not already cached
         const { data: lowStockItems } = await _supabase.from('medicines').select('name').lt('qty', 50).limit(1);
         const lowStock = lowStockItems && lowStockItems[0];
@@ -1539,7 +1536,7 @@ window.renderView = async function(viewName) {
                         <tbody>
                             ${state.pendingReturns.map(req => `
                             <tr>
-                                <td>${state.pharmacies[req.pharmacyId]?.name?.fr || 'Pharmacie #'+req.pharmacyId}</td>
+                                <td>${state.pharmacies[req.pharmacyId]?.name?.fr || 'Pharmacie #' + req.pharmacyId}</td>
                                 <td><strong>${req.medName}</strong></td>
                                 <td><span class="status-badge warning">${req.qty}</span></td>
                                 <td>${window.parseWorkerName(req.workerName, 'fr')}</td>
@@ -1557,7 +1554,7 @@ window.renderView = async function(viewName) {
 
         const pendingOrders = (state.orders || []).filter(o => o.status === 'PENDING');
         let ordersHtml = '';
-        if(pendingOrders.length > 0) {
+        if (pendingOrders.length > 0) {
             ordersHtml = `
             <div class="dash-row" style="margin-bottom:20px;">
                 <div class="dash-col" style="flex:1; border:2px solid var(--highlight-gold);">
@@ -1568,7 +1565,7 @@ window.renderView = async function(viewName) {
                             ${pendingOrders.map(o => `
                             <tr>
                                 <td><strong>${o.id && o.id.startsWith('BC-') ? o.id : '#' + o.id}</strong></td>
-                                <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
+                                <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #' + o.pharmacyId}</td>
                                 <td>${o.workerName}</td>
                                 <td>${new Date(o.date).toLocaleDateString('fr-FR')}</td>
                                 <td>
@@ -1632,7 +1629,7 @@ window.renderView = async function(viewName) {
                 ` : ''}
             </div>
         `;
-    } 
+    }
     else if (viewName === 'central') {
         pageTitle.innerText = t('page_central');
         const p = pagination.central;
@@ -1646,10 +1643,10 @@ window.renderView = async function(viewName) {
                 order: { col: 'name', ascending: true }
             });
             p.total = total;
-            
+
             const currentMeds = meds.map(m => ({
                 id: m.id, name: m.name, batch: m.batch, qty: m.qty, price: m.price || 0,
-                entryDate: m.entry_date || '-', expiry: m.expiry_date || '-' 
+                entryDate: m.entry_date || '-', expiry: m.expiry_date || '-'
             }));
 
             const pendingOrders = (state.orders || []).filter(o => o.status === 'PENDING');
@@ -1668,7 +1665,7 @@ window.renderView = async function(viewName) {
                                 ${pendingOrders.map(o => `
                                 <tr>
                                     <td><strong>${o.id && o.id.startsWith('BC-') ? o.id : '#' + o.id}</strong></td>
-                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
+                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #' + o.pharmacyId}</td>
                                     <td>${new Date(o.date).toLocaleDateString('fr-FR')}</td>
                                     <td>
                                         <button class="primary-btn" style="padding:2px 6px; font-size:11px; background:var(--info-blue);" onclick="window.downloadSavedReceipt('${o.id}')">PDF</button>
@@ -1703,7 +1700,7 @@ window.renderView = async function(viewName) {
                             <i class="fa-solid fa-trash-can"></i> ${t('btn_delete_selected')}
                         </button>
                         <button class="primary-btn" style="background:#b91c1c;" onclick="window.deleteAllMeds()">
-                            <i class="fa-solid fa-circle-exclamation"></i> ${currentLang==='ar'?'حذف الكل (تصفير)':'Tout Supprimer'}
+                            <i class="fa-solid fa-circle-exclamation"></i> ${currentLang === 'ar' ? 'حذف الكل (تصفير)' : 'Tout Supprimer'}
                         </button>
                         ` : `
                         <button class="primary-btn" style="background:#0284c7;" onclick="window.exportCentralStockToExcel()">
@@ -1757,7 +1754,7 @@ window.renderView = async function(viewName) {
 
             // Handle Import Excel Listener
             const importInput = document.getElementById('import-excel');
-            if(importInput) {
+            if (importInput) {
                 importInput.addEventListener('change', window.handleCentralImport);
             }
 
@@ -1770,14 +1767,14 @@ window.renderView = async function(viewName) {
 
     else if (viewName === 'distribution') {
         pageTitle.innerText = t('page_distribution');
-        
+
         // Scalability: Fetch a sample of active medicines for the datalist
         const { data: activeMeds } = await _supabase.from('medicines')
             .select('id, name, batch, qty, expiry_date')
             .gt('qty', 0)
             .order('name', { ascending: true })
             .limit(2000);
-        
+
         content += `
             ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) ? `
             <div class="transfer-card">
@@ -1847,7 +1844,7 @@ window.renderView = async function(viewName) {
                                 <td>${window.formatDate(tItem.date)}</td>
                                 <td>#TRN-${tItem.id}</td>
                                 <td><strong>${tItem.medName}</strong></td>
-                                <td><span class="status-badge ${tItem.isReturn ? 'warning' : 'good'}">${tItem.isReturn ? '-'+tItem.qty : '+'+tItem.qty}</span></td>
+                                <td><span class="status-badge ${tItem.isReturn ? 'warning' : 'good'}">${tItem.isReturn ? '-' + tItem.qty : '+' + tItem.qty}</span></td>
                                 <td>${state.pharmacies[tItem.toPharmacy]?.name.fr || ''} <small>${tItem.isReturn ? '(Retour)' : ''}</small></td>
                             </tr>
                         `).join('')}
@@ -1855,9 +1852,9 @@ window.renderView = async function(viewName) {
                 </table>
             </div>
         `;
-        
+
         viewContainer.innerHTML = content;
-        
+
         // Search Listener for Distribution History
         const distSearchInput = document.getElementById('search-dist-history');
         if (distSearchInput) {
@@ -1869,9 +1866,9 @@ window.renderView = async function(viewName) {
                 debounceSearch(() => window.renderView('distribution'), 500);
             });
         }
-        
+
         // Add first row automatically
-        window.addDistRow = function() {
+        window.addDistRow = function () {
             const tbody = document.getElementById('bulk-trans-tbody');
             const row = document.createElement('tr');
             row.className = 'bulk-row';
@@ -1888,8 +1885,8 @@ window.renderView = async function(viewName) {
             `;
             tbody.appendChild(row);
         };
-        
-        window.removeDistRow = function(btn) {
+
+        window.removeDistRow = function (btn) {
             const row = btn.closest('tr');
             if (document.querySelectorAll('.bulk-row').length > 1) {
                 row.remove();
@@ -1905,10 +1902,10 @@ window.renderView = async function(viewName) {
             e.preventDefault();
             const pharmId = parseInt(document.getElementById('bulk-trans-pharmacy').value);
             const rows = document.querySelectorAll('.bulk-row');
-            
+
             const batch = [];
             let valid = true;
-            
+
             // Scalability Fix: Fetch only required medicines from Supabase (since state.medicines is now empty)
             const medNamesRequested = Array.from(rows).map(r => {
                 const val = r.querySelector('.row-med-search').value;
@@ -1932,7 +1929,7 @@ window.renderView = async function(viewName) {
 
             // Create a local copy of stock to track allocations within this session
             const localStock = dbStock.map(m => ({ ...m, expiry: m.expiry_date }));
-            
+
             for (const row of rows) {
                 const searchValue = row.querySelector('.row-med-search').value;
                 const qtyRequested = parseInt(row.querySelector('.row-qty').value);
@@ -1946,17 +1943,17 @@ window.renderView = async function(viewName) {
                 }
 
                 // FEFO: Get matching batches from local tracking, sorted by expiry
-                const eligibleBatches = localStock.filter(m => 
-                    m.name === medName && 
-                    m.qty > 0 && 
+                const eligibleBatches = localStock.filter(m =>
+                    m.name === medName &&
+                    m.qty > 0 &&
                     !isExpired(m.expiry)
-                ).sort((a,b) => {
+                ).sort((a, b) => {
                     const parseDate = (d) => {
                         if (!d || d === '-') return new Date(8640000000000000);
                         const parts = d.split('T')[0].split(/[-/]/);
                         if (parts.length === 3) {
-                            if (parts[0].length === 4) return new Date(parts[0], parts[1]-1, parts[2]);
-                            if (parts[2].length === 4) return new Date(parts[2], parts[1]-1, parts[0]);
+                            if (parts[0].length === 4) return new Date(parts[0], parts[1] - 1, parts[2]);
+                            if (parts[2].length === 4) return new Date(parts[2], parts[1] - 1, parts[0]);
                         }
                         return new Date(d);
                     };
@@ -1989,7 +1986,7 @@ window.renderView = async function(viewName) {
                                 icon: 'fa-triangle-exclamation'
                             });
                         }
-                        
+
                         if (!bypass) {
                             if (!isManager) {
                                 await window.showCustomDialog({
@@ -2002,7 +1999,7 @@ window.renderView = async function(viewName) {
                             break;
                         }
                     }
-                    
+
                     // Prioritize the selected lot whether it's best or bypassed
                     const selectedIndex = eligibleBatches.findIndex(b => b.batch === selectedLot);
                     if (selectedIndex > -1) {
@@ -2015,25 +2012,25 @@ window.renderView = async function(viewName) {
                     if (remaining <= 0) break;
                     const take = Math.min(b.qty, remaining);
                     batch.push({ medId: b.id, qty: take, medName: b.name, batch: b.batch, expiry: b.expiry });
-                    
+
                     // Deduct from local tracking so we don't double-count in next rows
                     b.qty -= take;
                     remaining -= take;
                 }
             }
-            
+
             if (!valid || batch.length === 0) return;
 
             try {
                 window.showToast("Traitement de l'envoi...", "info");
-                
+
                 // Fetch current pharmacy stock for these medicines to calculate new totals correctly
                 const medIds = batch.map(b => b.medId);
                 const { data: pStockData } = await _supabase.from('pharmacy_stock')
                     .select('*')
                     .eq('pharmacy_id', pharmId)
                     .in('medicine_id', medIds);
-                
+
                 const pStockMap = {};
                 if (pStockData) pStockData.forEach(ps => pStockMap[ps.medicine_id] = ps.qty);
 
@@ -2064,14 +2061,14 @@ window.renderView = async function(viewName) {
 
                 // Run all medicine updates in parallel
                 await Promise.all(medicineUpdates);
-                
+
                 // Bulk upsert pharmacy stocks
                 await _supabase.from('pharmacy_stock').upsert(pharmacyStockUpserts, { onConflict: 'pharmacy_id,medicine_id' });
-                
+
                 // Bulk insert transfers
                 await _supabase.from('transfers').insert(transferInserts);
                 const barcode = await window.getNextCounterValue('delivery');
-                
+
                 const newReceipt = {
                     id: barcode, date: new Date().toISOString(), type: 'DISTRIBUTION',
                     pharmacy_id: pharmId, items: batch,
@@ -2105,7 +2102,7 @@ window.renderView = async function(viewName) {
     }
     else if (viewName === 'admin_orders' && currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
         pageTitle.innerText = "Gestion des Commandes";
-        
+
         // Auto-sync orders from Supabase every time this view is opened
         loadDataFromSupabase();
 
@@ -2123,7 +2120,7 @@ window.renderView = async function(viewName) {
                                 ${pendingOrders.length > 0 ? pendingOrders.map(o => `
                                 <tr>
                                     <td><strong>#${o.id}</strong></td>
-                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
+                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #' + o.pharmacyId}</td>
                                     <td>${o.workerName || '---'}</td>
                                     <td>${formatDate(o.date)}</td>
                                     <td>
@@ -2149,7 +2146,7 @@ window.renderView = async function(viewName) {
                                 <tr>
                                     <td>${formatDate(o.date)}</td>
                                     <td><strong>#${o.id}</strong></td>
-                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #'+o.pharmacyId}</td>
+                                    <td>${state.pharmacies[o.pharmacyId]?.name?.fr || 'Pharmacie #' + o.pharmacyId}</td>
                                     <td>${o.workerName || '---'}</td>
                                     <td>
                                         <button class="icon-btn" style="color:var(--danger-red);" onclick="window.downloadSavedReceipt('${o.id}')" title="Télécharger PDF"><i class="fa-solid fa-file-pdf"></i></button>
@@ -2165,7 +2162,7 @@ window.renderView = async function(viewName) {
     }
     else if (viewName === 'admin_returns' && currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
         pageTitle.innerText = "Gestion des Retours Stock";
-        
+
         const pending = (state.pendingReturns || []).slice().reverse();
         const history = (state.allReturns || []).filter(r => r.status !== 'PENDING').slice().reverse();
 
@@ -2179,7 +2176,7 @@ window.renderView = async function(viewName) {
                             <tbody>
                                 ${pending.length > 0 ? pending.map(r => `
                                 <tr>
-                                    <td>${state.pharmacies[r.pharmacyId]?.name?.fr || 'Pharmacie #'+r.pharmacyId}</td>
+                                    <td>${state.pharmacies[r.pharmacyId]?.name?.fr || 'Pharmacie #' + r.pharmacyId}</td>
                                     <td><strong>${r.medName}</strong></td>
                                     <td><span class="status-badge warning">${r.qty}</span></td>
                                     <td>${window.parseWorkerName(r.workerName, 'fr')}</td>
@@ -2206,7 +2203,7 @@ window.renderView = async function(viewName) {
                                 ${history.length > 0 ? history.map(r => `
                                 <tr>
                                     <td>${formatDate(r.date)}</td>
-                                    <td>${state.pharmacies[r.pharmacyId]?.name?.fr || 'Pharmacie #'+r.pharmacyId}</td>
+                                    <td>${state.pharmacies[r.pharmacyId]?.name?.fr || 'Pharmacie #' + r.pharmacyId}</td>
                                     <td><strong>${r.medName}</strong></td>
                                     <td>${r.qty}</td>
                                     <td><span class="status-badge ${r.status === 'APPROVED' ? 'good' : 'bad'}">${r.status}</span></td>
@@ -2236,7 +2233,7 @@ window.renderView = async function(viewName) {
             const pRows = currentPats.map(p => {
                 let actions = '';
                 let checkbox = '';
-                if(currentUser && currentUser.role === 'admin') {
+                if (currentUser && currentUser.role === 'admin') {
                     checkbox = `<td><input type="checkbox" class="patient-checkbox" value="${p.id}"></td>`;
                     actions = `
                         <td>
@@ -2262,7 +2259,7 @@ window.renderView = async function(viewName) {
                     <div style="display:flex; gap: 10px;">
                         ${currentUser && currentUser.role === 'admin' ? `
                         <button class="primary-btn" onclick="window.openPatientModal()">
-                            <i class="fa-solid fa-plus"></i> ${currentLang==='ar'?'إضافة مريض':'Ajouter Patient'}
+                            <i class="fa-solid fa-plus"></i> ${currentLang === 'ar' ? 'إضافة مريض' : 'Ajouter Patient'}
                         </button>
                         <label class="primary-btn" style="background:#059669; cursor:pointer;">
                             <i class="fa-solid fa-file-import"></i> ${t('btn_import_patients')}
@@ -2405,10 +2402,10 @@ window.renderView = async function(viewName) {
                                 <td>${r.target_name || r.targetName || 'Inconnu'}</td>
                                 <td>${typeof r.items === 'string' ? JSON.parse(r.items).length : (r.items ? r.items.length : 0)} médicament(s)</td>
                                 <td>
-                                    ${r.signed_photo 
-                                        ? `<a href="${r.signed_photo}" download="Justificatif_${r.id}.${r.signed_photo.startsWith('data:application/pdf') ? 'pdf' : 'webp'}" class="status-badge good" style="text-decoration:none; display:inline-flex; align-items:center; gap:5px;"><i class="fa-solid ${r.signed_photo.startsWith('data:application/pdf') ? 'fa-file-pdf' : 'fa-image'}"></i> Justificatif</a>` 
-                                        : `<button class="primary-btn btn-sm" style="background:var(--danger-red); color:#fff; padding: 6px 12px; font-size: 0.8rem;" onclick="window.triggerPhotoUpload('${r.id}')"><i class="fa-solid fa-camera"></i> / <i class="fa-solid fa-file-pdf"></i> Ajouter</button>`
-                                    }
+                                    ${r.signed_photo
+                ? `<a href="${r.signed_photo}" download="Justificatif_${r.id}.${r.signed_photo.startsWith('data:application/pdf') ? 'pdf' : 'webp'}" class="status-badge good" style="text-decoration:none; display:inline-flex; align-items:center; gap:5px;"><i class="fa-solid ${r.signed_photo.startsWith('data:application/pdf') ? 'fa-file-pdf' : 'fa-image'}"></i> Justificatif</a>`
+                : `<button class="primary-btn btn-sm" style="background:var(--danger-red); color:#fff; padding: 6px 12px; font-size: 0.8rem;" onclick="window.triggerPhotoUpload('${r.id}')"><i class="fa-solid fa-camera"></i> / <i class="fa-solid fa-file-pdf"></i> Ajouter</button>`
+            }
                                     <input type="file" id="upload-photo-${r.id}" accept="image/*,application/pdf" style="display:none;" onchange="window.handlePhotoUpload(event, '${r.id}')" />
                                 </td>
                             </tr>
@@ -2420,7 +2417,7 @@ window.renderView = async function(viewName) {
         `;
     }
     else if (viewName === 'users') {
-        if(currentUser.role !== 'admin') { window.renderView('dashboard'); return; }
+        if (currentUser.role !== 'admin') { window.renderView('dashboard'); return; }
         pageTitle.innerText = "Gestion des Utilisateurs";
 
         const users = Object.keys(window.userDatabase).map(email => ({ email, ...window.userDatabase[email] }));
@@ -2452,12 +2449,12 @@ window.renderView = async function(viewName) {
                     </thead>
                     <tbody>
                         ${users.map(u => {
-                            const nameAr = (u.name && u.name.ar) ? u.name.ar : (u.name_ar || '---');
-                            const nameFr = (u.name && u.name.fr) ? u.name.fr : (u.name_fr || '---');
-                            const pharmName = u.pharmacyId && state.pharmacies[u.pharmacyId] 
-                                ? (state.pharmacies[u.pharmacyId].name?.fr || '-') 
-                                : '-';
-                            return `
+            const nameAr = (u.name && u.name.ar) ? u.name.ar : (u.name_ar || '---');
+            const nameFr = (u.name && u.name.fr) ? u.name.fr : (u.name_fr || '---');
+            const pharmName = u.pharmacyId && state.pharmacies[u.pharmacyId]
+                ? (state.pharmacies[u.pharmacyId].name?.fr || '-')
+                : '-';
+            return `
                             <tr>
                                 <td>${nameAr} / ${nameFr}</td>
                                 <td><strong>${u.email}</strong></td>
@@ -2474,12 +2471,12 @@ window.renderView = async function(viewName) {
                                     <button class="icon-btn delete-btn" onclick="window.deleteUser('${u.email}')" title="Supprimer"><i class="fa-solid fa-user-minus"></i></button>
                                 </td>
                             </tr>`;
-                        }).join('')}
+        }).join('')}
                     </tbody>
                 </table>
             </div>
         `;
-    } 
+    }
     else if (viewName === 'records') {
         pageTitle.innerText = t('page_records');
         const p = pagination.records;
@@ -2578,7 +2575,7 @@ window.renderView = async function(viewName) {
         else if (timeframe === 'week') startDate.setDate(startDate.getDate() - 14); // Show last 2 weeks
         else if (timeframe === 'month') startDate.setMonth(startDate.getMonth() - 3); // Show last 3 months
         else if (timeframe === 'year') startDate.setFullYear(startDate.getFullYear() - 1); // Show last year
-        
+
         const isoStart = startDate.toISOString().split('T')[0];
         // SCALABILITY: Fetch a larger batch for analytics (up to 10,000 records)
         const { data: reportData } = await _supabase.from('dispensations')
@@ -2598,23 +2595,23 @@ window.renderView = async function(viewName) {
             const mName = d.medicine_name || d.medName;
             const pName = d.patient_name || d.patientName;
             const qty = d.qty;
-            
+
             // For Pharmacy Details
-            if(!groups[key]) groups[key] = {};
-            if(!groups[key][pId]) groups[key][pId] = { patients: new Set(), meds: {} };
+            if (!groups[key]) groups[key] = {};
+            if (!groups[key][pId]) groups[key][pId] = { patients: new Set(), meds: {} };
             groups[key][pId].patients.add(pName);
-            if(!groups[key][pId].meds[mName]) groups[key][pId].meds[mName] = 0;
+            if (!groups[key][pId].meds[mName]) groups[key][pId].meds[mName] = 0;
             groups[key][pId].meds[mName] += qty;
 
             // For Global Medicine Report
-            if(!globalMedGroups[key]) globalMedGroups[key] = {};
-            if(!globalMedGroups[key][mName]) globalMedGroups[key][mName] = { qty: 0, patients: new Set() };
+            if (!globalMedGroups[key]) globalMedGroups[key] = {};
+            if (!globalMedGroups[key][mName]) globalMedGroups[key][mName] = { qty: 0, patients: new Set() };
             globalMedGroups[key][mName].qty += qty;
             globalMedGroups[key][mName].patients.add(pName);
         });
 
-        const sortedPeriods = Object.keys(groups).sort((a,b) => new Date(b) - new Date(a));
-        
+        const sortedPeriods = Object.keys(groups).sort((a, b) => new Date(b) - new Date(a));
+
         // Flatten for pagination
         const flatPharmRows = [];
         sortedPeriods.forEach(pKey => {
@@ -2645,7 +2642,7 @@ window.renderView = async function(viewName) {
             return `
                 <tr>
                     <td style="white-space:nowrap;"><strong>${window.formatReportPeriod(row.pKey, timeframe)}</strong></td>
-                    <td>${state.pharmacies[row.pId]?.name?.fr || 'Pharmacie #'+row.pId}</td>
+                    <td>${state.pharmacies[row.pId]?.name?.fr || 'Pharmacie #' + row.pId}</td>
                     <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
                 </tr>
             `;
@@ -2722,7 +2719,7 @@ window.renderView = async function(viewName) {
         `;
 
         // Export active tab setter to window
-        window.setReportTab = function(tab) {
+        window.setReportTab = function (tab) {
             activeReportTab = tab;
             window.renderView('analytical_reports');
         };
@@ -2730,31 +2727,31 @@ window.renderView = async function(viewName) {
     else if (viewName === 'my_register' && currentUser && currentUser.role === 'pharmacy') {
         const pharmId = currentUser.pharmacyId;
         pageTitle.innerText = t('nav_my_register');
-        
+
         const myLogs = [];
         state.transfers.filter(tItem => tItem.toPharmacy == pharmId).forEach(tItem => {
-            myLogs.push({ 
+            myLogs.push({
                 ref: `TRN-${tItem.id}`,
-                date: tItem.date, 
-                action: tItem.isReturn ? 'Retour' : 'Réception', 
-                med: tItem.medName, 
-                qty: tItem.isReturn ? `-${tItem.qty}` : `+${tItem.qty}`, 
+                date: tItem.date,
+                action: tItem.isReturn ? 'Retour' : 'Réception',
+                med: tItem.medName,
+                qty: tItem.isReturn ? `-${tItem.qty}` : `+${tItem.qty}`,
                 target: 'Stock Central',
                 worker: window.parseWorkerName(tItem.dispensedBy, currentLang)
             });
         });
         state.dispensations.filter(d => d.pharmacyId == pharmId).forEach(d => {
-            myLogs.push({ 
+            myLogs.push({
                 ref: d.reference,
-                date: d.date, 
-                action: 'Délivrance', 
-                med: d.medName, 
-                qty: `-${d.qty}`, 
+                date: d.date,
+                action: 'Délivrance',
+                med: d.medName,
+                qty: `-${d.qty}`,
                 target: d.patientName,
                 worker: window.parseWorkerName(d.dispensedBy, currentLang)
             });
         });
-        myLogs.sort((a,b) => new Date(b.date) - new Date(a.date));
+        myLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
 
         const rows = myLogs.map(l => `
             <tr>
@@ -2835,17 +2832,17 @@ window.renderView = async function(viewName) {
             </div>
         `;
     }
-    
+
     viewContainer.innerHTML = content;
     window.checkAndShowOrphanRepair();
 
     // Listeners for Patients View (Merged here for reachability)
     if (viewName === 'patients') {
         const importPatientsInput = document.getElementById('import-patients-excel');
-        if(importPatientsInput) {
+        if (importPatientsInput) {
             importPatientsInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
-                if(!file) return;
+                if (!file) return;
                 window.handlePatientsImport(file);
             });
         }
@@ -2857,10 +2854,10 @@ function generateCentralTableRows(meds) {
         let status = `<span class="status-badge good">${t('status_good')}</span>`;
         if (m.qty === 0) status = `<span class="status-badge danger">${t('status_empty')}</span>`;
         else if (m.qty < 50) status = `<span class="status-badge warning">${t('status_low')}</span>`;
-        
+
         let actions = '';
         let checkbox = '';
-        if(currentUser && currentUser.role === 'admin') {
+        if (currentUser && currentUser.role === 'admin') {
             checkbox = `<td><input type="checkbox" class="med-checkbox" value="${m.id}"></td>`;
             actions = `
                 <td>
@@ -2887,15 +2884,15 @@ function generateCentralTableRows(meds) {
 }
 
 // Central Stock Import Handler (standalone, so it works as an event listener reference)
-window.handleCentralImport = async function(e) {
+window.handleCentralImport = async function (e) {
     const file = e.target.files[0];
-    if(!file) return;
+    if (!file) return;
     window.showToast("Importation en cours...", "info");
     const reader = new FileReader();
-    reader.onload = async function(evt) {
+    reader.onload = async function (evt) {
         try {
             const data = evt.target.result;
-            const workbook = XLSX.read(data, {type: 'binary'});
+            const workbook = XLSX.read(data, { type: 'binary' });
             const firstSheet = workbook.SheetNames[0];
             const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { header: 1 });
             const medsToInsert = [];
@@ -2963,7 +2960,7 @@ window.handleCentralImport = async function(e) {
                 const chunk = finalMeds.slice(i, i + 500);
                 // Use upsert if unique constraint is available, otherwise fall back to explicit insert/update
                 const { error: upsertErr } = await _supabase.from('medicines').upsert(chunk, { onConflict: 'name,batch' });
-                
+
                 if (upsertErr) {
                     console.warn("Standard Upsert failed, using manual batch processing:", upsertErr);
                     for (const m of chunk) {
@@ -2988,13 +2985,13 @@ window.handleCentralImport = async function(e) {
     reader.readAsBinaryString(file);
 };
 
-window.handlePatientsImport = function(file) {
+window.handlePatientsImport = function (file) {
     window.showToast("Importation en cours...", "info");
     const reader = new FileReader();
-    reader.onload = async function(evt) {
+    reader.onload = async function (evt) {
         try {
             const data = evt.target.result;
-            const workbook = XLSX.read(data, {type: 'binary'});
+            const workbook = XLSX.read(data, { type: 'binary' });
             const firstSheet = workbook.SheetNames[0];
             const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
             const patsToInsert = [];
@@ -3010,24 +3007,24 @@ window.handlePatientsImport = function(file) {
                     else if (k.includes('مستشفى') || k.includes('مركز') || k.includes('جهة') || k.includes('hospital') || k.includes('hopital') || k.includes('hôpital') || k.includes('structure') || k.includes('etablissement') || k.includes('يتابع')) hospital = val;
                 }
                 if (name === 'Unknown' && keys.length > 0) name = r[keys[0]];
-                if(name && name !== 'Unknown') {
+                if (name && name !== 'Unknown') {
                     patsToInsert.push({ name, national_id: nid, phone, hospital });
                 }
             });
-            
+
             const { data: maxRowsPats } = await _supabase.from('patients').select('id').order('id', { ascending: false }).limit(1);
             let currentPatId = (maxRowsPats && maxRowsPats.length > 0) ? parseInt(maxRowsPats[0].id) : 0;
-            
+
             patsToInsert.forEach(p => {
                 currentPatId++;
                 p.id = currentPatId;
             });
 
-            for(let i = 0; i < patsToInsert.length; i += 1000) {
+            for (let i = 0; i < patsToInsert.length; i += 1000) {
                 const res = await _supabase.from('patients').insert(patsToInsert.slice(i, i + 1000));
                 if (res.error) throw res.error;
             }
-            
+
             window.optimisticUpdate('central_stock_change');
             window.showToast(t('alert_success'));
             window.renderView('patients');
@@ -3039,18 +3036,18 @@ window.handlePatientsImport = function(file) {
     reader.readAsBinaryString(file);
 };
 
-window.renderPharmacy = async function(pharmId, subView = 'all') {
+window.renderPharmacy = async function (pharmId, subView = 'all') {
     // Track active pharmacy for pagination awareness
     window.activePharmacyId = pharmId;
     window.activeSubView = subView;
     const p = state.pharmacies[pharmId];
     pageTitle.innerText = p.name.fr;
-    
+
     const isFullAdmin = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager');
-    
+
     let notificationsHtml = '';
     const myReceipts = (state.receipts || []).filter(r => (r.pharmacy_id || r.pharmacyId) == pharmId).slice().reverse();
-    if(myReceipts.length > 0) {
+    if (myReceipts.length > 0) {
         notificationsHtml = `
             <div class="transfer-card" style="border-left: 5px solid var(--highlight-gold);">
                 <div class="block-title" style="color: var(--primary-brand);"><i class="fa-solid fa-bell" style="color:var(--highlight-gold);"></i> Boîte de réception (Décharges)</div>
@@ -3099,14 +3096,14 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             .select('*, medicines(id, name, batch, expiry_date)')
             .eq('pharmacy_id', pharmId)
             .range(stockFrom, stockFrom + stockStep - 1);
-        
+
         if (error) throw error;
         if (!data || data.length === 0) break;
         allStockData = allStockData.concat(data);
         stockFrom += stockStep;
         if (data.length < stockStep) break;
     }
-    
+
     // Update local p.stock cache to support other functions (returns, etc)
     p.stock = (allStockData || []).filter(ps => ps.medicines != null).map(ps => ({
         id: ps.medicines.id,
@@ -3119,11 +3116,11 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
     // 2. Filter out orphans and apply search locally
     let filteredStock = (allStockData || []).filter(ps => ps.medicines != null);
-    
+
     const searchLow = (pStockState.search || '').toLowerCase().trim();
     if (searchLow) {
-        filteredStock = filteredStock.filter(ps => 
-            ps.medicines.name.toLowerCase().includes(searchLow) || 
+        filteredStock = filteredStock.filter(ps =>
+            ps.medicines.name.toLowerCase().includes(searchLow) ||
             (ps.medicines.batch && ps.medicines.batch.toLowerCase().includes(searchLow))
         );
     }
@@ -3143,15 +3140,15 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
     // 4. Fetch Meta & History in Parallel
     const numericId = parseInt(pharmId);
-    const [dispTotal, lowStockTotal, expiredTotal, {data: dispHistory, total: historyTotal}, {data: recentMeds}, {data: recentPats}] = await Promise.all([
+    const [dispTotal, lowStockTotal, expiredTotal, { data: dispHistory, total: historyTotal }, { data: recentMeds }, { data: recentPats }] = await Promise.all([
         _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId),
         _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).lt('qty', 50),
-        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).filter('medicine_id', 'in', 
+        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).filter('medicine_id', 'in',
             (await _supabase.from('medicines').select('id').lt('expiry_date', new Date().toISOString().split('T')[0])).data?.map(m => m.id) || []
         ),
-        fetchTableData('dispensations', { 
-            page: pHistoryState.currentPage, 
-            pageSize: pHistoryState.pageSize, 
+        fetchTableData('dispensations', {
+            page: pHistoryState.currentPage,
+            pageSize: pHistoryState.pageSize,
             search: pHistoryState.search,
             filters: { pharmacy_id: numericId },
             order: { col: 'date', ascending: false }
@@ -3175,7 +3172,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
         <div class="page-header" style="justify-content: flex-end; gap: 10px;">
             ${isFullAdmin ? `
             <button class="primary-btn" style="background:#059669;" onclick="document.getElementById('import-pharm-stock-${pharmId}').click()">
-                <i class="fa-solid fa-file-import"></i> ${currentLang==='ar'?'استيراد مخزون ابتدائي':'Import Stock Initial'}
+                <i class="fa-solid fa-file-import"></i> ${currentLang === 'ar' ? 'استيراد مخزون ابتدائي' : 'Import Stock Initial'}
             </button>
             <input type="file" id="import-pharm-stock-${pharmId}" accept=".xlsx, .xls, .csv" style="display:none;" onchange="window.importPharmacyStock(event, ${pharmId})">
             
@@ -3184,7 +3181,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             </button>
 
             <button class="primary-btn" style="background:var(--accent-green);" onclick="window.openDistForPharmacy(${pharmId})">
-                <i class="fa-solid fa-truck-ramp-box"></i> ${currentLang==='ar'?'إرسال أدوية لهذه الصيدلية':'Restocker cette pharmacie'}
+                <i class="fa-solid fa-truck-ramp-box"></i> ${currentLang === 'ar' ? 'إرسال أدوية لهذه الصيدلية' : 'Restocker cette pharmacie'}
             </button>
             ` : ''}
         </div>
@@ -3311,7 +3308,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <button type="button" class="primary-btn" onclick="window.addDispRow(${pharmId})"><i class="fa-solid fa-plus-circle"></i> Ajouter</button>
                     <div style="display:flex; gap:10px;">
-                        ${isFullAdmin ? `<button type="button" class="primary-btn" style="background:#6366f1;" onclick="window.triggerExceptionalDispense(${pharmId})"><i class="fa-solid fa-bolt"></i> ${currentLang==='ar'?'صرف استثنائي':'Saisie Exceptionnelle'}</button>` : ''}
+                        ${isFullAdmin ? `<button type="button" class="primary-btn" style="background:#6366f1;" onclick="window.triggerExceptionalDispense(${pharmId})"><i class="fa-solid fa-bolt"></i> ${currentLang === 'ar' ? 'صرف استثنائي' : 'Saisie Exceptionnelle'}</button>` : ''}
                         <button type="submit" class="primary-btn" style="background:var(--accent-green); padding:12px 32px;"><i class="fa-solid fa-check-double"></i> Confirmer la Délivrance</button>
                     </div>
                 </div>
@@ -3419,7 +3416,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     }
 
     // Helper: Add Dispense Row
-    window.addDispRow = function(id) {
+    window.addDispRow = function (id) {
         const tbody = document.getElementById(`bulk-disp-tbody-${id}`);
         if (!tbody) return;
         const row = document.createElement('tr');
@@ -3433,7 +3430,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             <td style="text-align:center;"><button type="button" class="icon-btn delete-btn" onclick="this.closest('tr').remove()"><i class="fa-solid fa-xmark"></i></button></td>
         `;
         tbody.appendChild(row);
-        
+
         row.querySelector('.row-med-disp-search').addEventListener('input', (e) => {
             const list = document.getElementById(`disp-meds-list-${pharmId}`);
             const option = Array.from(list.options).find(o => o.value === e.target.value);
@@ -3445,12 +3442,12 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
     if (subView === 'pharm-dispense') window.addDispRow(pharmId);
 
     const dispForm = document.getElementById(`bulk-dispense-form-${pharmId}`);
-    if(dispForm && !dispForm.dataset.listenerAttached) {
+    if (dispForm && !dispForm.dataset.listenerAttached) {
         dispForm.dataset.listenerAttached = 'true';
         dispForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const patientInput = document.getElementById(`disp-patient-${pharmId}`).value.trim();
-            
+
             // Scalability: Fetch patient from DB instead of relying on potentially incomplete state.patients
             let matchedPatient = null;
             if (patientInput) {
@@ -3474,7 +3471,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 window.showToast(t('error_unregistered_patient') || "Patient introuvable dans le système. Veuillez d'abord l'enregistrer.", 'error');
                 return;
             }
-            
+
             const patientName = matchedPatient ? matchedPatient.name : patientInput;
             const rows = document.querySelectorAll('.bulk-disp-row');
             const items = [];
@@ -3487,7 +3484,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 const searchVal = row.querySelector('.row-med-disp-search').value;
                 const qtyRequested = parseInt(row.querySelector('.row-qty').value);
                 if (!searchVal || isNaN(qtyRequested)) continue;
-                
+
                 let medName = searchVal;
                 // Clean up the name by removing everything after the first bracket or parenthesis
                 if (searchVal.includes(' [')) {
@@ -3497,17 +3494,17 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 }
 
                 // FEFO for Pharmacy Stock
-                const eligibleBatches = localPStock.filter(m => 
-                    m.name === medName && 
-                    m.qty > 0 && 
+                const eligibleBatches = localPStock.filter(m =>
+                    m.name === medName &&
+                    m.qty > 0 &&
                     !isExpired(m.expiry)
-                ).sort((a,b) => {
+                ).sort((a, b) => {
                     const parseDate = (d) => {
                         if (!d || d === '-') return new Date(8640000000000000);
                         const parts = d.split('T')[0].split(/[-/]/);
                         if (parts.length === 3) {
-                            if (parts[0].length === 4) return new Date(parts[0], parts[1]-1, parts[2]);
-                            if (parts[2].length === 4) return new Date(parts[2], parts[1]-1, parts[0]);
+                            if (parts[0].length === 4) return new Date(parts[0], parts[1] - 1, parts[2]);
+                            if (parts[2].length === 4) return new Date(parts[2], parts[1] - 1, parts[0]);
                         }
                         return new Date(d);
                     };
@@ -3538,20 +3535,20 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                                 icon: 'fa-triangle-exclamation'
                             });
                         }
-                        
+
                         if (!bypass) {
                             if (!isManager) {
-                                await window.showCustomDialog({ 
-                                    title: "Alerte FEFO", 
-                                    msg: `Attention! Le Lot [${bestLot}] expire le [${eligibleBatches[0].expiry}] (Priorité FEFO). Veuillez le délivrer en premier avant le Lot [${selectedLot}].`, 
-                                    icon: "fa-triangle-exclamation" 
+                                await window.showCustomDialog({
+                                    title: "Alerte FEFO",
+                                    msg: `Attention! Le Lot [${bestLot}] expire le [${eligibleBatches[0].expiry}] (Priorité FEFO). Veuillez le délivrer en premier avant le Lot [${selectedLot}].`,
+                                    icon: "fa-triangle-exclamation"
                                 });
                             }
                             valid = false;
                             break;
                         }
                     }
-                    
+
                     // Prioritize the selected lot whether it's best or bypassed
                     const selectedIndex = eligibleBatches.findIndex(b => b.batch === selectedLot);
                     if (selectedIndex > -1) {
@@ -3564,19 +3561,19 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     if (remaining <= 0) break;
                     const take = Math.min(b.qty, remaining);
                     items.push({ medId: b.id, qty: take, medName: b.name, batch: b.batch, expiry: b.expiry });
-                    
+
                     // Deduct from local tracking
                     b.qty -= take;
                     remaining -= take;
                 }
             }
 
-            if(!valid || items.length === 0) return;
+            if (!valid || items.length === 0) return;
 
             // --- REGLE DES 28 JOURS ---
             const twentyEightDaysAgo = new Date();
             twentyEightDaysAgo.setDate(twentyEightDaysAgo.getDate() - 28);
-            
+
             if (!window._isExceptional) {
                 const checks = items.map(item =>
                     _supabase.from('dispensations')
@@ -3610,7 +3607,7 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 window.showToast(currentLang === 'ar' ? 'تم تجاوز حاجز الـ 28 يوماً استثنائياً' : 'Délivrance exceptionnelle approuvée', 'info');
             }
             window._isExceptional = false;
-            if(!valid) return;
+            if (!valid) return;
 
             try {
                 const barcode = await window.getNextCounterValue('dispense');
@@ -3665,11 +3662,11 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
             }
         });
     }
-    
+
     // Order Form Submittal (Bon de Commande)
-    window.addOrderRow = function(id) {
+    window.addOrderRow = function (id) {
         const tbody = document.getElementById(`order-tbody-${id}`);
-        if(!tbody) return;
+        if (!tbody) return;
         const row = document.createElement('tr');
         row.className = 'order-row';
         row.innerHTML = `
@@ -3688,9 +3685,9 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
 
     const orderBody = document.getElementById(`order-tbody-${pharmId}`);
     if (orderBody) window.addOrderRow(pharmId); // Initial logic added here
-    
+
     const orderForm = document.getElementById(`order-form-${pharmId}`);
-    if(orderForm) {
+    if (orderForm) {
         orderForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const rows = document.querySelectorAll('.order-row');
@@ -3701,14 +3698,14 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                 const inputMed = row.querySelector('.row-med').value.trim();
                 const qty = parseInt(row.querySelector('.row-qty').value);
 
-                if(!inputMed || isNaN(qty) || qty < 1) {
+                if (!inputMed || isNaN(qty) || qty < 1) {
                     valid = false;
                     return;
                 }
                 items.push({ medName: inputMed, qty });
             });
 
-            if(!valid || items.length === 0) {
+            if (!valid || items.length === 0) {
                 await window.showCustomDialog({ title: "Saisie Invalide", msg: "Voulez-vous remplir correctement au moins un médicament avec une quantité valide ?", icon: "fa-circle-xclamation" });
                 return;
             }
@@ -3741,16 +3738,16 @@ window.renderPharmacy = async function(pharmId, subView = 'all') {
                     status: 'PENDING',
                     items: items
                 }]);
-                
+
                 if (insertError) throw insertError;
-                
+
                 window.optimisticUpdate('order_added', { id: barcode, pharmId: safePharmId, workerName: workerName, items: items });
                 await window.showCustomDialog({ title: "Succès", msg: "Votre Bon de Commande a été envoyé avec succès au Stock Central.", icon: "fa-circle-check" });
                 await window.autoDownloadReceipt('COMMANDE', 'Pharmacie Centrale (Stock)', items, barcode);
                 window.renderPharmacy(pharmId, 'pharm-order');
             } catch (err) {
                 console.error(err);
-                await window.showCustomDialog({ title: "Erreur", msg: "Erreur lors de l'enregistrement de la commande: " + (err.message || err),  icon: "fa-circle-xclamation" });
+                await window.showCustomDialog({ title: "Erreur", msg: "Erreur lors de l'enregistrement de la commande: " + (err.message || err), icon: "fa-circle-xclamation" });
             }
         });
     }
@@ -3765,50 +3762,50 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Helper to bridge to distribution view
-window.openDistForPharmacy = function(pharmId) {
+window.openDistForPharmacy = function (pharmId) {
     window.preSelectedPharm = pharmId;
     window.renderView('distribution');
 };
 
-window.openPatientModal = async function(id = null) {
+window.openPatientModal = async function (id = null) {
     const modal = document.getElementById('patient-modal');
     const form = document.getElementById('patient-form');
     const title = document.getElementById('patient-modal-title');
-    
+
     form.reset();
     document.getElementById('patient-id').value = id || '';
-    
-    if(id) {
+
+    if (id) {
         title.innerText = currentLang === 'ar' ? 'تعديل مريض' : 'Modifier le Patient';
         window.updateSyncStatus('syncing');
         try {
             const { data: p } = await _supabase.from('patients').select('*').eq('id', id).single();
-            if(!p) return;
+            if (!p) return;
             document.getElementById('patient-name-input').value = p.name || '';
             document.getElementById('patient-nid-input').value = p.national_id || '';
             document.getElementById('patient-phone-input').value = p.phone || '';
             document.getElementById('patient-hospital-input').value = p.hospital || '';
             window.updateSyncStatus('success');
-        } catch(e) { window.updateSyncStatus('error'); }
+        } catch (e) { window.updateSyncStatus('error'); }
     } else {
         title.innerText = currentLang === 'ar' ? 'إضافة مريض جديد' : 'Ajouter un Patient';
     }
-    
+
     modal.classList.add('active');
 };
 
-window.editPatient = function(id) {
+window.editPatient = function (id) {
     window.openPatientModal(id);
 };
 
-window.deletePatient = async function(id) {
-    const confirm = await window.showCustomDialog({ 
-        title: "Suppression", 
-        msg: currentLang === 'ar' ? "هل أنت متأكد من حذف هذا المريض؟" : "Supprimer ce patient ?", 
-        type: 'confirm', 
-        icon: 'fa-trash-can' 
+window.deletePatient = async function (id) {
+    const confirm = await window.showCustomDialog({
+        title: "Suppression",
+        msg: currentLang === 'ar' ? "هل أنت متأكد من حذف هذا المريض؟" : "Supprimer ce patient ?",
+        type: 'confirm',
+        icon: 'fa-trash-can'
     });
-    if(confirm) {
+    if (confirm) {
         try {
             await _supabase.from('patients').delete().eq('id', id);
             window.optimisticUpdate('patient_deleted', { id: id });
@@ -3821,7 +3818,7 @@ window.deletePatient = async function(id) {
 // Or just handle it here if it's simpler
 document.addEventListener('DOMContentLoaded', () => {
     const pForm = document.getElementById('patient-form');
-    if(pForm) {
+    if (pForm) {
         pForm.onsubmit = async (e) => {
             e.preventDefault();
             const id = document.getElementById('patient-id').value;
@@ -3829,14 +3826,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const nid = document.getElementById('patient-nid-input').value.trim();
             const phone = document.getElementById('patient-phone-input').value.trim();
             const hospital = document.getElementById('patient-hospital-input').value.trim();
-            
+
             if (!name) {
                 window.showToast("Le nom est obligatoire", "error");
                 return;
             }
 
             window.showToast("Enregistrement...", "info");
-            
+
             try {
                 // Duplicate check ONLY for NEW patients
                 if (!id) {
@@ -3844,10 +3841,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (nid) {
                         const { data: existingNID } = await _supabase.from('patients').select('id').eq('national_id', nid).maybeSingle();
                         if (existingNID) {
-                            await window.showCustomDialog({ 
-                                title: currentLang === 'ar' ? 'تنبيه: المريض موجود' : "Patient déjà existant", 
-                                msg: currentLang === 'ar' ? `هذا الرقم الوطني (${nid}) مسجل مسبقاً لمريض آخر.` : `Ce NNIR (${nid}) est déjà enregistré pour un autre patient.`, 
-                                icon: 'fa-user-tag' 
+                            await window.showCustomDialog({
+                                title: currentLang === 'ar' ? 'تنبيه: المريض موجود' : "Patient déjà existant",
+                                msg: currentLang === 'ar' ? `هذا الرقم الوطني (${nid}) مسجل مسبقاً لمريض آخر.` : `Ce NNIR (${nid}) est déjà enregistré pour un autre patient.`,
+                                icon: 'fa-user-tag'
                             });
                             return;
                         }
@@ -3867,13 +3864,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 const payload = { name, national_id: nid, phone, hospital };
-                
-                if(id) {
+
+                if (id) {
                     await _supabase.from('patients').update(payload).eq('id', id);
                 } else {
                     await _supabase.from('patients').insert([payload]);
                 }
-                
+
                 if (!id) window.optimisticUpdate('patient_added');
                 document.getElementById('patient-modal').classList.remove('active');
                 window.renderView('patients');
@@ -3886,9 +3883,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-window.deleteMedicine = async function(id) {
+window.deleteMedicine = async function (id) {
     const confirm = await window.showCustomDialog({ title: "Suppression", msg: t('confirm_delete'), type: 'confirm', icon: 'fa-trash-can' });
-    if(confirm) {
+    if (confirm) {
         try {
             await _supabase.from('medicines').delete().eq('id', id);
             window.optimisticUpdate('central_stock_change');
@@ -3897,9 +3894,9 @@ window.deleteMedicine = async function(id) {
     }
 };
 
-window.editMedicine = async function(id) {
+window.editMedicine = async function (id) {
     const { data: med } = await _supabase.from('medicines').select('*').eq('id', id).single();
-    if(!med) return;
+    if (!med) return;
 
     document.getElementById('med-name').value = med.name;
     document.getElementById('med-batch').value = med.batch;
@@ -3909,32 +3906,32 @@ window.editMedicine = async function(id) {
     document.getElementById('med-expiry').value = (med.expiry_date || '').split('T')[0];
 
     document.getElementById('med-price').value = med.price || 0;
-    
+
     document.getElementById('add-medicine-form').dataset.editId = id;
     document.getElementById('add-medicine-modal').classList.add('active');
 };
 
-window.returnToCentral = async function(pharmId, medId) {
+window.returnToCentral = async function (pharmId, medId) {
     const p = state.pharmacies[pharmId];
     const med = p.stock.find(m => m.id === medId);
-    if(!med) return;
-    
-    const qtyStr = await window.showCustomDialog({ 
-        title: "Retour Stock", 
-        msg: (currentLang === 'ar' ? 'الكمية المراد إرجاعها من ' : 'Quantité à retourner de ') + med.name, 
-        type: 'prompt', 
-        defaultValue: '1', 
-        icon: 'fa-rotate-left' 
+    if (!med) return;
+
+    const qtyStr = await window.showCustomDialog({
+        title: "Retour Stock",
+        msg: (currentLang === 'ar' ? 'الكمية المراد إرجاعها من ' : 'Quantité à retourner de ') + med.name,
+        type: 'prompt',
+        defaultValue: '1',
+        icon: 'fa-rotate-left'
     });
-    if(qtyStr === null) return;
+    if (qtyStr === null) return;
     const qty = parseInt(qtyStr);
-    if(isNaN(qty) || qty <= 0 || qty > med.qty) {
+    if (isNaN(qty) || qty <= 0 || qty > med.qty) {
         await window.showCustomDialog({ title: "Erreur", msg: t('alert_error'), icon: 'fa-circle-xclamation' });
         return;
     }
-    
+
     const workerName = currentUser ? (typeof currentUser.name === 'object' ? (currentUser.name.fr || currentUser.name.ar) : currentUser.name) : 'Système';
-    
+
     try {
         const { error } = await _supabase.from('return_requests').insert([{
             pharmacy_id: pharmId,
@@ -3946,10 +3943,10 @@ window.returnToCentral = async function(pharmId, medId) {
         }]);
 
         if (error) throw error;
-        
+
         window.optimisticUpdate('central_stock_change');
         await window.showCustomDialog({ title: "Succès", msg: t('alert_request_sent'), icon: 'fa-circle-check' });
-        
+
         // Refresh view
         if (currentUser.role === 'pharmacy') {
             window.renderPharmacy(pharmId, 'all');
@@ -3962,13 +3959,13 @@ window.returnToCentral = async function(pharmId, medId) {
     }
 };
 
-window.approveReturn = async function(reqId) {
+window.approveReturn = async function (reqId) {
     const req = (state.allReturns || []).find(r => r.id === reqId);
-    if(!req) return;
-    
+    if (!req) return;
+
     try {
         window.showToast("Traitement en cours...", "info");
-        
+
         // 1. Check current pharmacy stock
         const { data: ps, error: psError } = await _supabase
             .from('pharmacy_stock')
@@ -3976,7 +3973,7 @@ window.approveReturn = async function(reqId) {
             .eq('pharmacy_id', req.pharmacyId)
             .eq('medicine_id', req.medId)
             .single();
-            
+
         if (psError || !ps || ps.qty < req.qty) {
             await window.showCustomDialog({ title: "Erreur", msg: "Stock insuffisant en pharmacie pour valider ce retour.", icon: "fa-circle-xclamation" });
             return;
@@ -3985,7 +3982,7 @@ window.approveReturn = async function(reqId) {
         // 2. Atomic Updates
         // A. Reduce Pharmacy Stock
         await _supabase.from('pharmacy_stock').update({ qty: ps.qty - req.qty }).eq('pharmacy_id', req.pharmacyId).eq('medicine_id', req.medId);
-        
+
         // B. Increase Central Stock
         const { data: medData } = await _supabase.from('medicines').select('qty').eq('id', req.medId).single();
         if (medData) {
@@ -4005,7 +4002,7 @@ window.approveReturn = async function(reqId) {
 
         // D. Mark Request as APPROVED
         await _supabase.from('return_requests').update({ status: 'APPROVED' }).eq('id', reqId);
-        
+
         window.optimisticUpdate('return_approved', { id: reqId, qty: parseInt(req.qty) || 0 });
         window.showToast("Retour approuvé avec succès");
         window.renderView(activeView);
@@ -4015,7 +4012,7 @@ window.approveReturn = async function(reqId) {
     }
 };
 
-window.rejectReturn = async function(reqId) {
+window.rejectReturn = async function (reqId) {
     try {
         await _supabase.from('return_requests').update({ status: 'REJECTED' }).eq('id', reqId);
         window.optimisticUpdate('return_approved', { id: reqId, qty: 0 }); // rejection doesn't add stock
@@ -4027,14 +4024,14 @@ window.rejectReturn = async function(reqId) {
     }
 };
 
-window.markOrderTreated = async function(orderId) {
-    const confirm = await window.showCustomDialog({ 
-        title: "Traitement Commande", 
-        msg: "Confirmez-vous que cette commande a été traitée ?", 
-        type: 'confirm', 
-        icon: 'fa-clipboard-check' 
+window.markOrderTreated = async function (orderId) {
+    const confirm = await window.showCustomDialog({
+        title: "Traitement Commande",
+        msg: "Confirmez-vous que cette commande a été traitée ?",
+        type: 'confirm',
+        icon: 'fa-clipboard-check'
     });
-    if(confirm) {
+    if (confirm) {
         try {
             await _supabase.from('orders').update({ status: 'TREATED' }).eq('id', orderId);
             window.optimisticUpdate('order_processed', { id: orderId });
@@ -4044,23 +4041,23 @@ window.markOrderTreated = async function(orderId) {
             } else {
                 window.renderView('dashboard');
             }
-        } catch(err) { console.error(err); }
+        } catch (err) { console.error(err); }
     }
 };
 
-window.toggleAllMeds = function(source) {
+window.toggleAllMeds = function (source) {
     document.querySelectorAll('.med-checkbox').forEach(cb => cb.checked = source.checked);
 };
 
-window.deleteSelectedMeds = async function() {
+window.deleteSelectedMeds = async function () {
     const selected = Array.from(document.querySelectorAll('.med-checkbox:checked')).map(cb => parseInt(cb.value));
-    if(selected.length === 0) return;
-    
+    if (selected.length === 0) return;
+
     const title = currentLang === 'ar' ? "حذف جماعي" : "Suppression Groupée";
     const msg = currentLang === 'ar' ? `هل أنت متأكد من حذف ${selected.length} دواء محدد؟` : `Supprimer ${selected.length} médicaments sélectionnés ?`;
-    
+
     const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-trash-can' });
-    if(confirm) {
+    if (confirm) {
         try {
             await _supabase.from('medicines').delete().in('id', selected);
             window.optimisticUpdate('central_stock_change');
@@ -4069,19 +4066,19 @@ window.deleteSelectedMeds = async function() {
     }
 };
 
-window.toggleAllPatients = function(source) {
+window.toggleAllPatients = function (source) {
     document.querySelectorAll('.patient-checkbox').forEach(cb => cb.checked = source.checked);
 };
 
-window.deleteSelectedPatients = async function() {
+window.deleteSelectedPatients = async function () {
     const selected = Array.from(document.querySelectorAll('.patient-checkbox:checked')).map(cb => parseInt(cb.value));
-    if(selected.length === 0) return;
-    
+    if (selected.length === 0) return;
+
     const title = currentLang === 'ar' ? "حذف جماعي" : "Suppression Groupée";
     const msg = currentLang === 'ar' ? `هل أنت متأكد من حذف ${selected.length} مريض محدد؟` : `Supprimer ${selected.length} patients sélectionnés ?`;
-    
+
     const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-user-minus' });
-    if(confirm) {
+    if (confirm) {
         try {
             await _supabase.from('patients').delete().in('id', selected);
             window.optimisticUpdate('central_stock_change');
@@ -4090,11 +4087,11 @@ window.deleteSelectedPatients = async function() {
     }
 };
 
-window.toggleAllPharmacyStock = function(source, pharmId) {
+window.toggleAllPharmacyStock = function (source, pharmId) {
     document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}`).forEach(cb => cb.checked = source.checked);
 };
 
-window.deleteSelectedPharmacyStock = async function(pharmId) {
+window.deleteSelectedPharmacyStock = async function (pharmId) {
     const selected = Array.from(document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}:checked`)).map(cb => cb.value);
     if (selected.length === 0) {
         showToast(currentLang === 'ar' ? 'لم يتم تحديد أي دواء' : "Aucun médicament sélectionné", 'error');
@@ -4114,25 +4111,25 @@ window.deleteSelectedPharmacyStock = async function(pharmId) {
         window.updateSyncStatus('syncing');
         const { error } = await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).in('medicine_id', selected);
         if (error) throw error;
-        
+
         await window.renderPharmacy(pharmId);
         window.updateSyncStatus('success');
         showToast(currentLang === 'ar' ? 'تم الحذف بنجاح' : "Articles supprimés avec succès");
-    } catch(err) {
+    } catch (err) {
         console.error(err);
         window.updateSyncStatus('error');
         showToast("Erreur lors de la suppression", "error");
     }
 };
 
-window.deleteFromPharmacyStock = async function(pharmId, medId) {
-    const confirm = await window.showCustomDialog({ 
-        title: "Suppression", 
-        msg: currentLang === 'ar' ? "هل أنت متأكد من حذف هذا الدواء من مخزون هذه الصيدلية؟" : "Supprimer ce médicament du stock de cette pharmacie ?", 
-        type: 'confirm', 
-        icon: 'fa-trash-can' 
+window.deleteFromPharmacyStock = async function (pharmId, medId) {
+    const confirm = await window.showCustomDialog({
+        title: "Suppression",
+        msg: currentLang === 'ar' ? "هل أنت متأكد من حذف هذا الدواء من مخزون هذه الصيدلية؟" : "Supprimer ce médicament du stock de cette pharmacie ?",
+        type: 'confirm',
+        icon: 'fa-trash-can'
     });
-    if(confirm) {
+    if (confirm) {
         try {
             await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).eq('medicine_id', medId);
             window.optimisticUpdate('central_stock_change');
@@ -4141,15 +4138,15 @@ window.deleteFromPharmacyStock = async function(pharmId, medId) {
     }
 };
 
-window.deleteSelectedPharmacyStock = async function(pharmId) {
+window.deleteSelectedPharmacyStock = async function (pharmId) {
     const selected = Array.from(document.querySelectorAll(`.pharm-stock-checkbox-${pharmId}:checked`)).map(cb => parseInt(cb.value));
-    if(selected.length === 0) return;
-    
+    if (selected.length === 0) return;
+
     const title = currentLang === 'ar' ? "حذف جماعي" : "Suppression Groupée";
     const msg = currentLang === 'ar' ? `هل أنت متأكد من حذف ${selected.length} أدوية من مخزون الصيدلية؟` : `Supprimer ${selected.length} médicaments du stock de cette pharmacie ?`;
-    
+
     const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-trash-can' });
-    if(confirm) {
+    if (confirm) {
         try {
             await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).in('medicine_id', selected);
             window.optimisticUpdate('central_stock_change');
@@ -4158,20 +4155,20 @@ window.deleteSelectedPharmacyStock = async function(pharmId) {
     }
 };
 
-window.deleteAllMeds = async function() {
+window.deleteAllMeds = async function () {
     const title = currentLang === 'ar' ? "تصفير المخزون بالكامل" : "Reset Stock Complet";
     const msg = currentLang === 'ar' ? "تحذير: سيتم مسح جميع الأدوية من النظام والمخازن نهائياً! هل أنت متأكد؟" : "ATTENTION: Tous les médicaments seront supprimés du système définitivement ! Continuer ?";
-    
+
     const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-triangle-exclamation' });
-    if(confirm) {
-        const doubleCheck = await window.showCustomDialog({ 
-            title: currentLang === 'ar' ? "تأكيد أخير" : "Confirmation Finale", 
-            msg: currentLang === 'ar' ? "اكتب 'مسح' للتأكيد النهائي:" : "Tapez 'DELETE' pour confirmer :", 
+    if (confirm) {
+        const doubleCheck = await window.showCustomDialog({
+            title: currentLang === 'ar' ? "تأكيد أخير" : "Confirmation Finale",
+            msg: currentLang === 'ar' ? "اكتب 'مسح' للتأكيد النهائي:" : "Tapez 'DELETE' pour confirmer :",
             type: 'prompt',
             icon: 'fa-lock'
         });
-        
-        if(doubleCheck === (currentLang === 'ar' ? 'مسح' : 'DELETE')) {
+
+        if (doubleCheck === (currentLang === 'ar' ? 'مسح' : 'DELETE')) {
             window.showToast("Réinitialisation en cours...", "info");
             try {
                 // Delete from medicines (cascades to pharmacy_stock)
@@ -4184,23 +4181,23 @@ window.deleteAllMeds = async function() {
     }
 };
 
-window.deleteAllPatients = async function() {
+window.deleteAllPatients = async function () {
     const title = currentLang === 'ar' ? "مسح جميع المرضى" : "Supprimer Tous les Patients";
     const msg = currentLang === 'ar' ? "هل أنت متأكد من مسح قائمة المرضى بالكامل؟ لا يمكن التراجع عن هذه الخطوة." : "Voulez-vous vraiment supprimer TOUS les patients ? Cette action est irréversible.";
-    
+
     const confirm = await window.showCustomDialog({ title, msg, type: 'confirm', icon: 'fa-triangle-exclamation' });
-    if(confirm) {
-        const doubleCheck = await window.showCustomDialog({ 
-            title: currentLang === 'ar' ? "تأكيد أخير" : "Confirmation Finale", 
-            msg: currentLang === 'ar' ? "اكتب 'حذف' للتأكيد النهائي:" : "Tapez 'CONFIRMER' pour confirmer :", 
+    if (confirm) {
+        const doubleCheck = await window.showCustomDialog({
+            title: currentLang === 'ar' ? "تأكيد أخير" : "Confirmation Finale",
+            msg: currentLang === 'ar' ? "اكتب 'حذف' للتأكيد النهائي:" : "Tapez 'CONFIRMER' pour confirmer :",
             type: 'prompt',
             icon: 'fa-lock'
         });
-        
-        if(doubleCheck === (currentLang === 'ar' ? 'حذف' : 'CONFIRMER')) {
+
+        if (doubleCheck === (currentLang === 'ar' ? 'حذف' : 'CONFIRMER')) {
             window.showToast("Suppression en cours...", "info");
             try {
-                await _supabase.from('patients').delete().neq('id', 0); 
+                await _supabase.from('patients').delete().neq('id', 0);
                 window.optimisticUpdate('central_stock_change');
                 window.renderView('patients');
                 window.showToast("Liste des patients vidée.");
@@ -4210,39 +4207,39 @@ window.deleteAllPatients = async function() {
 };
 
 // Export Utilities
-window.downloadSavedReceipt = async function(receiptId) {
+window.downloadSavedReceipt = async function (receiptId) {
     // First try state.receipts
     const rcpt = state.receipts.find(r => r.id === receiptId);
-    if(rcpt) {
+    if (rcpt) {
         await window.autoDownloadReceipt(rcpt.type, rcpt.targetName, rcpt.items, rcpt.id, rcpt.date, rcpt.workerName);
         return;
     }
-    
+
     // Fallback: try state.orders (for order PDFs from admin panel)
     const order = state.orders.find(o => o.id === receiptId || String(o.id) === String(receiptId));
-    if(order) {
-        const pharmName = (state.pharmacies[order.pharmacyId]?.name?.fr) 
+    if (order) {
+        const pharmName = (state.pharmacies[order.pharmacyId]?.name?.fr)
             || (state.pharmacies[order.pharmacyId]?.name?.ar)
             || `Pharmacie #${order.pharmacyId}`;
         await window.autoDownloadReceipt('COMMANDE', pharmName, order.items || [], order.id, order.date, order.workerName || '---');
         return;
     }
-    
+
     await window.showCustomDialog({ title: "Introuvable", msg: "Le document PDF est introuvable. Il a peut-être été supprimé.", icon: "fa-circle-exclamation" });
 };
 
 
 
-window.autoDownloadReceipt = async function(type, targetName, items, existingBarcode, overrideDateStr, overrideWorkerName) {
-    if(typeof html2pdf === 'undefined') {
+window.autoDownloadReceipt = async function (type, targetName, items, existingBarcode, overrideDateStr, overrideWorkerName) {
+    if (typeof html2pdf === 'undefined') {
         await window.showCustomDialog({ title: "Module Manquant", msg: "La bibliothèque PDF n'est pas encore chargée.", icon: "fa-triangle-exclamation" });
         return;
     }
-    
+
     const dateStr = window.formatDate(overrideDateStr || new Date().toISOString()) + ' à ' + (overrideDateStr ? '' : new Date().toLocaleTimeString('fr-FR'));
     const isDist = type === 'DISTRIBUTION';
     const isCmd = type === 'COMMANDE';
-    
+
     let title = "Bon de Délivrance / Décharge";
     if (isDist) title = "Bon de Distribution / Décharge";
     if (isCmd) title = "Bon de Commande";
@@ -4331,18 +4328,18 @@ window.autoDownloadReceipt = async function(type, targetName, items, existingBar
     `;
 
     const opt = {
-        margin:       [0.5, 0.5, 0.5, 0.5],
-        filename:     `${isCmd ? 'Commande' : (isDist ? 'Distribution' : 'Delivrance')}_${barcode}.pdf`,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true },
-        jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+        margin: [0.5, 0.5, 0.5, 0.5],
+        filename: `${isCmd ? 'Commande' : (isDist ? 'Distribution' : 'Delivrance')}_${barcode}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
     html2pdf().set(opt).from(container).save();
 };
 
-window.exportToExcel = async function(tableId, fileName) {
-    if(typeof XLSX === 'undefined') {
+window.exportToExcel = async function (tableId, fileName) {
+    if (typeof XLSX === 'undefined') {
         window.showCustomDialog({ title: "Oups", msg: "La bibliothèque d'exportation n'est pas encore chargée.", icon: 'fa-triangle-exclamation' });
         return;
     }
@@ -4352,15 +4349,15 @@ window.exportToExcel = async function(tableId, fileName) {
         window.showToast("Préparation de l'exportation complète...", "info");
         try {
             let query = _supabase.from('dispensations').select('date, patient_name, medicine_name, qty, pharmacy_id, dispensed_by, reference').order('date', { ascending: false }).limit(50000);
-            
+
             if (tableId === 'my-register-table') {
                 const pharmId = window.preSelectedPharm || (currentUser && currentUser.pharmacyId);
                 if (pharmId) query = query.eq('pharmacy_id', pharmId);
             }
-            
+
             const { data, error } = await query;
             if (error) throw error;
-            
+
             const exportData = data.map(d => ({
                 "Date": new Date(d.date).toLocaleDateString('fr-FR'),
                 "Référence": d.reference || '',
@@ -4370,7 +4367,7 @@ window.exportToExcel = async function(tableId, fileName) {
                 "Pharmacie": state.pharmacies[d.pharmacy_id] ? (state.pharmacies[d.pharmacy_id].name.fr || state.pharmacies[d.pharmacy_id].name.ar) : 'Inconnu',
                 "Distribué par": d.dispensed_by || ''
             }));
-            
+
             const ws = XLSX.utils.json_to_sheet(exportData);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "Data");
@@ -4383,14 +4380,14 @@ window.exportToExcel = async function(tableId, fileName) {
             return;
         }
     }
-    
+
     if (tableId === 'expired-table') {
         window.showToast("Préparation de l'exportation des périmés...", "info");
         try {
             const today = new Date().toISOString().split('T')[0];
             const { data, error } = await _supabase.from('medicines').select('name, batch, expiry_date, qty, price').lt('expiry_date', today).limit(50000);
             if (error) throw error;
-            
+
             const exportData = data.map(d => ({
                 "Médicament": d.name,
                 "Lot": d.batch,
@@ -4398,7 +4395,7 @@ window.exportToExcel = async function(tableId, fileName) {
                 "Qté en stock": d.qty,
                 "Prix Achat": d.price || 0
             }));
-            
+
             const ws = XLSX.utils.json_to_sheet(exportData);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "Data");
@@ -4414,34 +4411,34 @@ window.exportToExcel = async function(tableId, fileName) {
 
     // FALLBACK: For non-paginated tables (like Reports), DOM export is perfect and preserves complex aggregations
     window.showToast("Génération du fichier Excel...", "info");
-    var wb = XLSX.utils.table_to_book(document.getElementById(tableId), {sheet: "Data"});
+    var wb = XLSX.utils.table_to_book(document.getElementById(tableId), { sheet: "Data" });
     XLSX.writeFile(wb, fileName + ".xlsx");
     window.showToast(currentLang === 'ar' ? 'تم تصدير ملف Excel بنجاح!' : "Export Excel réussi !");
 };
 
-window.printPage = function() {
+window.printPage = function () {
     window.print();
 };
 
-window.deleteUser = async function(email) {
+window.deleteUser = async function (email) {
     const confirm = await window.showCustomDialog({
         title: "Confirmation",
         msg: `Voulez-vous vraiment supprimer l'utilisateur ${email} ?`,
         type: 'confirm',
         icon: 'fa-user-minus'
     });
-    
-    if(confirm) {
+
+    if (confirm) {
         try {
             await _supabase.from('users').delete().eq('email', email);
             await syncUsers();
             window.renderView('users');
             showToast("Utilisateur supprimé");
-        } catch(e) { console.error(e); }
+        } catch (e) { console.error(e); }
     }
 };
 
-window.openUserModal = function(oldEmail = null) {
+window.openUserModal = function (oldEmail = null) {
     let modal = document.getElementById('user-modal');
     if (!modal) {
         // Inject modal if missing (fixes browser caching old index.html)
@@ -4494,7 +4491,7 @@ window.openUserModal = function(oldEmail = null) {
         `;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         modal = document.getElementById('user-modal');
-        
+
         // Attach listener since it didn't exist on load
         document.getElementById('user-form').addEventListener('submit', window.handleUserSubmit);
     }
@@ -4502,14 +4499,14 @@ window.openUserModal = function(oldEmail = null) {
     const form = document.getElementById('user-form');
     const title = document.getElementById('user-modal-title');
     const pharmSelect = document.getElementById('user-pharm-input');
-    
+
     form.reset();
     document.getElementById('user-old-email').value = oldEmail || '';
     document.getElementById('user-id').value = '';
     document.getElementById('user-pass-input').placeholder = oldEmail ? "Laissez vide pour ne pas changer" : "Définissez un mot de passe";
-    
+
     // Populate Pharmacies
-    pharmSelect.innerHTML = Object.keys(state.pharmacies).map(k => 
+    pharmSelect.innerHTML = Object.keys(state.pharmacies).map(k =>
         `<option value="${k}">${state.pharmacies[k].name.fr}</option>`
     ).join('');
 
@@ -4531,14 +4528,14 @@ window.openUserModal = function(oldEmail = null) {
         document.getElementById('user-pharm-group').style.display = 'block';
         document.getElementById('user-pass-input').value = '123456';
     }
-    
+
     modal.classList.add('active');
 };
 
-window.addUser = function() { window.openUserModal(); };
-window.editUser = function(email) { window.openUserModal(email); };
+window.addUser = function () { window.openUserModal(); };
+window.editUser = function (email) { window.openUserModal(email); };
 
-window.handleUserSubmit = async function(e) {
+window.handleUserSubmit = async function (e) {
     e.preventDefault();
     const oldEmail = document.getElementById('user-old-email').value;
     const id = document.getElementById('user-id').value;
@@ -4550,7 +4547,7 @@ window.handleUserSubmit = async function(e) {
     const pharmId = role === 'pharmacy' ? document.getElementById('user-pharm-input').value : null;
 
     window.updateSyncStatus('syncing', currentLang === 'ar' ? 'جاري الحفظ...' : 'Enregistrement...');
-    
+
     const payload = {
         email,
         name_fr: nameFr,
@@ -4562,7 +4559,7 @@ window.handleUserSubmit = async function(e) {
 
     try {
         if (oldEmail) {
-            const { error } = id 
+            const { error } = id
                 ? await _supabase.from('users').update(payload).eq('id', id)
                 : await _supabase.from('users').update(payload).eq('email', oldEmail);
             if (error) throw error;
@@ -4583,7 +4580,7 @@ window.handleUserSubmit = async function(e) {
     }
 };
 
-window.migrateUsersToCloud = async function() {
+window.migrateUsersToCloud = async function () {
     const defaultUsersList = [
         { email: 'admin@masef.com', password: '123456', role: 'admin', name_ar: 'المدير المركزي', name_fr: 'Directeur Central' },
         { email: 'ahmed@masef.com', password: '123456', role: 'pharmacy', pharmacy_id: 1, name_ar: 'أحمد', name_fr: 'Ahmed' },
@@ -4591,21 +4588,21 @@ window.migrateUsersToCloud = async function() {
         { email: 'yousef@masef.com', password: '123456', role: 'pharmacy', pharmacy_id: 3, name_ar: 'يوسف', name_fr: 'Yousef' },
         { email: 'omar@masef.com', password: '123456', role: 'pharmacy', pharmacy_id: 4, name_ar: 'عمر', name_fr: 'Omar' },
     ];
-    
+
     try {
         await _supabase.from('users').upsert(defaultUsersList, { onConflict: 'email' });
         await syncUsers();
         window.renderView('users');
         showToast("Comptes migrés vers le Cloud !");
-    } catch(e) { console.error(e); }
+    } catch (e) { console.error(e); }
 };
 
 // Pharmacy Management Functions
-window.addPharmacy = async function() {
+window.addPharmacy = async function () {
     const nameFr = await window.showCustomDialog({ title: "Nouvelle Pharmacie", msg: "Nom en français:", type: 'prompt', icon: 'fa-hospital' });
-    if(!nameFr) return;
+    if (!nameFr) return;
     const nameAr = await window.showCustomDialog({ title: "صيدلية جديدة", msg: "الاسم بالعربية:", type: 'prompt', defaultValue: nameFr, icon: 'fa-hospital' });
-    if(!nameAr) return;
+    if (!nameAr) return;
     const color = await window.showCustomDialog({ title: "Couleur", msg: "Code couleur (ex: #047857):", type: 'prompt', defaultValue: "#047857", icon: 'fa-palette' });
 
     try {
@@ -4620,15 +4617,15 @@ window.addPharmacy = async function() {
         window.optimisticUpdate('central_stock_change');
         renderView('manage_pharmacies');
         showToast("Pharmacie ajoutée");
-    } catch(e) { console.error(e); window.showCustomDialog({ title: "Erreur", msg: "Impossible d'ajouter la pharmacie.", icon: 'fa-circle-exclamation' }); }
+    } catch (e) { console.error(e); window.showCustomDialog({ title: "Erreur", msg: "Impossible d'ajouter la pharmacie.", icon: 'fa-circle-exclamation' }); }
 };
 
-window.editPharmacy = async function(id) {
+window.editPharmacy = async function (id) {
     // Search with both number and string key to handle HTML attribute type mismatch
     const numId = parseInt(id);
     const p = state.pharmacies[numId] || state.pharmacies[String(numId)] || state.pharmacies[id];
-    
-    if(!p) {
+
+    if (!p) {
         console.error("editPharmacy: ID received:", id, "| parseInt:", numId, "| Available keys:", Object.keys(state.pharmacies));
         window.showCustomDialog({ title: "Erreur", msg: "Pharmacie introuvable. Veuillez rafraîchir la page.", icon: 'fa-circle-exclamation' });
         return;
@@ -4637,30 +4634,30 @@ window.editPharmacy = async function(id) {
     const nameFr = (p.name && p.name.fr) || "";
     const nameAr = (p.name && p.name.ar) || "";
 
-    const newNameFr = await window.showCustomDialog({ 
-        title: "Modifier Nom (FR)", 
-        msg: "Nouveau nom français:", 
-        type: 'prompt', 
-        defaultValue: nameFr, 
-        icon: 'fa-pen-to-square' 
+    const newNameFr = await window.showCustomDialog({
+        title: "Modifier Nom (FR)",
+        msg: "Nouveau nom français:",
+        type: 'prompt',
+        defaultValue: nameFr,
+        icon: 'fa-pen-to-square'
     });
-    if(newNameFr === null) return;
+    if (newNameFr === null) return;
 
-    const newNameAr = await window.showCustomDialog({ 
-        title: "تعديل اسم الصيدلية", 
-        msg: "الاسم العربي الجديد:", 
-        type: 'prompt', 
-        defaultValue: nameAr, 
-        icon: 'fa-pen-to-square' 
+    const newNameAr = await window.showCustomDialog({
+        title: "تعديل اسم الصيدلية",
+        msg: "الاسم العربي الجديد:",
+        type: 'prompt',
+        defaultValue: nameAr,
+        icon: 'fa-pen-to-square'
     });
-    if(newNameAr === null) return;
+    if (newNameAr === null) return;
 
-    const newColor = await window.showCustomDialog({ 
-        title: "Modifier Couleur", 
-        msg: "Code couleur (ex: #047857):", 
-        type: 'prompt', 
-        defaultValue: p.color || "#047857", 
-        icon: 'fa-palette' 
+    const newColor = await window.showCustomDialog({
+        title: "Modifier Couleur",
+        msg: "Code couleur (ex: #047857):",
+        type: 'prompt',
+        defaultValue: p.color || "#047857",
+        icon: 'fa-palette'
     });
 
     try {
@@ -4668,39 +4665,39 @@ window.editPharmacy = async function(id) {
             .from('pharmacies')
             .update({ name_fr: newNameFr, name_ar: newNameAr, color: newColor || p.color })
             .eq('id', numId);
-        
+
         if (error) throw error;
-        
+
         // Update local state immediately
         state.pharmacies[numId] = { ...p, name: { fr: newNameFr, ar: newNameAr }, color: newColor || p.color };
-        
+
         window.optimisticUpdate('central_stock_change');
         window.renderView('manage_pharmacies');
         showToast("Pharmacie mise à jour avec succès");
-    } catch(e) { 
-        console.error("editPharmacy error:", e); 
-        window.showCustomDialog({ title: "Erreur", msg: e.message || "Erreur de mise à jour.", icon: 'fa-circle-exclamation' }); 
+    } catch (e) {
+        console.error("editPharmacy error:", e);
+        window.showCustomDialog({ title: "Erreur", msg: e.message || "Erreur de mise à jour.", icon: 'fa-circle-exclamation' });
     }
 };
 
-window.deletePharmacy = async function(id) {
+window.deletePharmacy = async function (id) {
     const confirm = await window.showCustomDialog({ title: "Suppression", msg: "Voulez-vous vraiment supprimer cette pharmacie ?", type: 'confirm', icon: 'fa-trash-can' });
-    if(!confirm) return;
+    if (!confirm) return;
     try {
         const { error } = await _supabase.from('pharmacies').delete().eq('id', id);
         if (error) throw error;
         window.optimisticUpdate('central_stock_change');
         renderView('manage_pharmacies');
         showToast("Pharmacie supprimée");
-    } catch(e) { console.error(e); window.showCustomDialog({ title: "Erreur", msg: "Impossible de supprimer (liens existants).", icon: 'fa-circle-exclamation' }); }
+    } catch (e) { console.error(e); window.showCustomDialog({ title: "Erreur", msg: "Impossible de supprimer (liens existants).", icon: 'fa-circle-exclamation' }); }
 };
 
-window.triggerExceptionalDispense = function(pharmId) {
+window.triggerExceptionalDispense = function (pharmId) {
     const form = document.getElementById(`bulk-dispense-form-${pharmId}`);
-    if(!form) return;
-    
+    if (!form) return;
+
     // Check required fields using standard browser validations
-    if(!form.checkValidity()) {
+    if (!form.checkValidity()) {
         form.reportValidity();
         return;
     }
@@ -4713,10 +4710,10 @@ window.triggerExceptionalDispense = function(pharmId) {
     form.dispatchEvent(submitEvent);
 };
 
-window.updateSidebarPharmacies = function() {
+window.updateSidebarPharmacies = function () {
     const container = document.getElementById('dynamic-pharmacies-sidebar');
-    if(!container) return;
-    
+    if (!container) return;
+
     let html = '';
     Object.entries(state.pharmacies).forEach(([pharmId, p]) => {
         const pId = parseInt(pharmId);
@@ -4725,8 +4722,8 @@ window.updateSidebarPharmacies = function() {
         if (currentUser && currentUser.role === 'pharmacy' && currentUser.pharmacyId !== pId) {
             displayStyle = 'none';
         }
-        
-        let pharmName = p.name ? (currentLang === 'ar' ? (p.name.ar || p.name.fr) : p.name.fr) : 'Pharmacie '+pId;
+
+        let pharmName = p.name ? (currentLang === 'ar' ? (p.name.ar || p.name.fr) : p.name.fr) : 'Pharmacie ' + pId;
         html += `
             <button class="nav-btn dynamic-pharm-btn" style="display: ${displayStyle};" data-view="pharmacy-${pharmId}" data-pharmacy-id="${pharmId}" onclick="window.handleSidebarPharmacyClick(this, ${pharmId})">
                 <i class="fa-solid fa-house-medical"></i> <span>${pharmName}</span>
@@ -4736,30 +4733,30 @@ window.updateSidebarPharmacies = function() {
     container.innerHTML = html;
 };
 
-window.handleSidebarPharmacyClick = function(btnElement, pharmId) {
+window.handleSidebarPharmacyClick = function (btnElement, pharmId) {
     document.querySelectorAll('.nav-btn, .dynamic-pharm-btn').forEach(b => b.classList.remove('active'));
     btnElement.classList.add('active');
     window.renderPharmacy(pharmId, 'all');
 };
 
-window.triggerPhotoUpload = function(id) {
+window.triggerPhotoUpload = function (id) {
     document.getElementById(`upload-photo-${id}`).click();
 };
 
-window.handlePhotoUpload = async function(event, receiptId) {
+window.handlePhotoUpload = async function (event, receiptId) {
     const file = event.target.files[0];
-    if(!file) return;
+    if (!file) return;
 
     window.showToast("Traitement en cours... Veuillez patienter.", "info");
 
     const updateDB = async (dataUrl) => {
         try {
-            const {error} = await _supabase.from('receipts').update({ signed_photo: dataUrl }).eq('id', receiptId);
-            if(error) throw error;
+            const { error } = await _supabase.from('receipts').update({ signed_photo: dataUrl }).eq('id', receiptId);
+            if (error) throw error;
             window.optimisticUpdate('central_stock_change');
             window.renderView('admin_decharges');
             window.showToast("Justificatif enregistré !", "success");
-        } catch(err) {
+        } catch (err) {
             console.error(err);
             const rec = state.receipts.find(r => r.id === receiptId);
             if (rec) rec.signed_photo = dataUrl;
@@ -4775,15 +4772,15 @@ window.handlePhotoUpload = async function(event, receiptId) {
             return;
         }
         const reader = new FileReader();
-        reader.onload = async function(e) {
+        reader.onload = async function (e) {
             await updateDB(e.target.result);
         };
         reader.readAsDataURL(file);
     } else {
         const reader = new FileReader();
-        reader.onload = function(e) {
+        reader.onload = function (e) {
             const img = new Image();
-            img.onload = async function() {
+            img.onload = async function () {
                 const canvas = document.createElement('canvas');
                 const MAX_WIDTH = 800; // compress dimension
                 let width = img.width;
@@ -4795,10 +4792,10 @@ window.handlePhotoUpload = async function(event, receiptId) {
                 }
                 canvas.width = width;
                 canvas.height = height;
-                
+
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
-                
+
                 const dataUrl = canvas.toDataURL('image/webp', 0.6);
                 await updateDB(dataUrl);
             };
@@ -4853,7 +4850,7 @@ if (_supabase) {
                 gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
                 oscillator.start(ctx.currentTime);
                 oscillator.stop(ctx.currentTime + 0.5);
-            } catch(e) { /* Sound not supported */ }
+            } catch (e) { /* Sound not supported */ }
 
             // Reload data and refresh dashboard silently
             window.optimisticUpdate('central_stock_change');
@@ -4881,7 +4878,7 @@ function playNotificationSound() {
         gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
         oscillator.start(ctx.currentTime);
         oscillator.stop(ctx.currentTime + 0.5);
-    } catch(e) {}
+    } catch (e) { }
 }
 
 setInterval(async () => {
@@ -4900,23 +4897,23 @@ setInterval(async () => {
             window.optimisticUpdate('central_stock_change');
         }
         lastKnownOrderCount = currentCount;
-    } catch(e) { /* Polling failed silently */ }
+    } catch (e) { /* Polling failed silently */ }
 }, 30000); // Every 30 seconds
 
 
-window.consolidateStock = async function() {
+window.consolidateStock = async function () {
     const confirm = await window.showCustomDialog({
         title: currentLang === 'ar' ? "دمج الأدوية المكررة" : "Consolider les Doublons",
         msg: currentLang === 'ar' ? "سيتم دمج الأدوية التي لها نفس الاسم والتشغيلة وجمع كمياتها. هل تريد الاستمرار؟" : "Tous los médicaments avec le même Nom et Lot seront fusionnés. Continuer ?",
         type: 'confirm',
         icon: 'fa-wand-magic-sparkles'
     });
-    
-    if(confirm) {
+
+    if (confirm) {
         window.showToast("Consolidation en cours...", "info");
         try {
             const { data: allMeds } = await _supabase.from('medicines').select('*');
-            if(!allMeds) return;
+            if (!allMeds) return;
 
             const map = {};
             const toDelete = [];
@@ -4924,44 +4921,44 @@ window.consolidateStock = async function() {
 
             allMeds.forEach(m => {
                 const key = `${String(m.name).toLowerCase().trim()}|${String(m.batch).toLowerCase().trim()}`;
-                if(!map[key]) {
+                if (!map[key]) {
                     map[key] = { ...m };
                 } else {
                     map[key].qty += (m.qty || 0);
                     toDelete.push(m.id);
-                    if(!toUpdate.find(u => u.id === map[key].id)) {
+                    if (!toUpdate.find(u => u.id === map[key].id)) {
                         toUpdate.push(map[key]);
                     }
                 }
             });
 
-            if(toUpdate.length > 0) {
-                for(const m of toUpdate) {
+            if (toUpdate.length > 0) {
+                for (const m of toUpdate) {
                     await _supabase.from('medicines').update({ qty: m.qty }).eq('id', m.id);
                 }
             }
-            if(toDelete.length > 0) {
+            if (toDelete.length > 0) {
                 await _supabase.from('medicines').delete().in('id', toDelete);
             }
 
             window.optimisticUpdate('central_stock_change');
             window.showToast("Stock consolidé avec succès !");
             window.renderView('dashboard');
-        } catch(err) {
+        } catch (err) {
             console.error(err);
             window.showToast("Erreur lors de la consolidation", "error");
         }
     }
 };
 
-window.checkAndShowOrphanRepair = async function() {
+window.checkAndShowOrphanRepair = async function () {
     if (!currentUser || currentUser.role !== 'admin') {
         console.log("Repair tool skipped: User is not admin or not logged in.");
         return;
     }
-    
+
     console.log("Checking for orphans in pharmacy_stock...");
-    
+
     const container = document.getElementById('orphan-repair-container');
     const list = document.getElementById('orphan-repair-list');
     if (!container || !list) {
@@ -4973,18 +4970,18 @@ window.checkAndShowOrphanRepair = async function() {
         // 1. Fetch all unique medicine_ids from pharmacy_stock
         const { data: stockItems, error: stockErr } = await _supabase.from('pharmacy_stock').select('medicine_id');
         if (stockErr) throw stockErr;
-        
+
         const stockIds = Array.from(new Set(stockItems.map(s => s.medicine_id).filter(id => id)));
-        
+
         // 2. Fetch all existing medicine IDs
         const { data: medItems, error: medErr } = await _supabase.from('medicines').select('id');
         if (medErr) throw medErr;
-        
+
         const medIds = new Set(medItems.map(m => m.id));
-        
+
         // 3. Identify orphans (IDs in stock but not in medicines)
         const orphans = stockIds.filter(id => !medIds.has(id));
-        
+
         console.log("Orphans detected:", orphans);
 
         if (orphans.length === 0) {
@@ -4993,7 +4990,7 @@ window.checkAndShowOrphanRepair = async function() {
         }
 
         container.style.display = 'block';
-        
+
         // 4. Get all valid medicines for the dropdown
         const { data: validMeds } = await _supabase.from('medicines').select('id, name, batch').order('name');
         const optionsHtml = (validMeds || []).map(m => `<option value="${m.id}">${m.name} [${m.batch}]</option>`).join('');
@@ -5009,13 +5006,13 @@ window.checkAndShowOrphanRepair = async function() {
                 <button class="primary-btn" style="background:#059669; color:white; width:auto; padding:10px 20px; border-radius:8px; font-weight:bold;" onclick="window.repairOrphan(${id})">إصلاح ودمج</button>
             </div>
         `).join('');
-        
+
     } catch (err) {
         console.error("Orphan check failed:", err);
     }
 };
 
-window.repairOrphan = async function(oldId) {
+window.repairOrphan = async function (oldId) {
     const targetId = document.getElementById(`repair-select-${oldId}`).value;
     if (!targetId) {
         window.showToast("يرجى اختيار الدواء أولاً", "error");
@@ -5028,15 +5025,15 @@ window.repairOrphan = async function(oldId) {
         type: 'confirm',
         icon: 'fa-triangle-exclamation'
     });
-    
+
     if (!confirmRepair) return;
 
     window.showToast("جاري الإصلاح...", "info");
-    
+
     try {
         // 1. Get all stock records for this orphan across all pharmacies
         const { data: orphans } = await _supabase.from('pharmacy_stock').select('*').eq('medicine_id', oldId);
-        
+
         if (orphans && orphans.length > 0) {
             for (const orphan of orphans) {
                 // 2. Check if target exists in this pharmacy
@@ -5045,7 +5042,7 @@ window.repairOrphan = async function(oldId) {
                     .eq('pharmacy_id', orphan.pharmacy_id)
                     .eq('medicine_id', targetId)
                     .maybeSingle();
-                
+
                 if (existing) {
                     // Update: Add qty to existing row
                     await _supabase.from('pharmacy_stock')
@@ -5058,10 +5055,10 @@ window.repairOrphan = async function(oldId) {
                 }
             }
         }
-        
+
         // 3. Delete orphans
         await _supabase.from('pharmacy_stock').delete().eq('medicine_id', oldId);
-        
+
         window.showToast("تم الإصلاح بنجاح!", "success");
         window.optimisticUpdate('central_stock_change');
         window.renderView('dashboard');
@@ -5071,19 +5068,19 @@ window.repairOrphan = async function(oldId) {
     }
 };
 
-window.consolidatePharmacyStock = async function(pharmId) {
+window.consolidatePharmacyStock = async function (pharmId) {
     const confirm = await window.showCustomDialog({
         title: currentLang === 'ar' ? "دمج مخزون الصيدلية" : "Consolider Stock Pharmacie",
         msg: currentLang === 'ar' ? "هل تريد دمج الأدوية المكررة في هذه الصيدلية؟ سيتم جمع الكميات." : "Voulez-vous fusionner les doublons dans cette pharmacie ? Les quantités seront cumulées.",
         type: 'confirm',
         icon: 'fa-wand-magic-sparkles'
     });
-    if(!confirm) return;
+    if (!confirm) return;
 
     window.showToast("Consolidation...", "info");
     try {
         const { data: allItems } = await _supabase.from('pharmacy_stock').select('*').eq('pharmacy_id', pharmId);
-        if(!allItems || allItems.length === 0) return;
+        if (!allItems || allItems.length === 0) return;
 
         const map = {};
         const toDelete = [];
@@ -5091,43 +5088,43 @@ window.consolidatePharmacyStock = async function(pharmId) {
 
         allItems.forEach(item => {
             const key = item.medicine_id;
-            if(!map[key]) {
+            if (!map[key]) {
                 map[key] = { ...item };
             } else {
                 map[key].qty += item.qty;
                 toDelete.push(item.id);
-                if(!toUpdate.find(u => u.id === map[key].id)) {
+                if (!toUpdate.find(u => u.id === map[key].id)) {
                     toUpdate.push(map[key]);
                 }
             }
         });
 
-        if(toUpdate.length > 0) {
-            for(const item of toUpdate) {
+        if (toUpdate.length > 0) {
+            for (const item of toUpdate) {
                 await _supabase.from('pharmacy_stock').update({ qty: item.qty }).eq('id', item.id);
             }
         }
-        if(toDelete.length > 0) {
+        if (toDelete.length > 0) {
             await _supabase.from('pharmacy_stock').delete().in('id', toDelete);
         }
 
         window.showToast("Terminé !");
         window.renderPharmacy(pharmId);
-    } catch(err) {
+    } catch (err) {
         console.error(err);
         window.showToast("Erreur", "error");
     }
 };
 
 
-window.restoreHospitalNationalStock = async function() {
+window.restoreHospitalNationalStock = async function () {
     const confirm = await window.showCustomDialog({
         title: "Restaurer le stock",
         msg: "Voulez-vous restaurer les 61 articles de l'image pour l'Hôpital National ?",
         type: 'confirm',
         icon: 'fa-image'
     });
-    if(!confirm) return;
+    if (!confirm) return;
 
     window.showToast("Restauration en cours...", "info");
     const pharmId = 4;
@@ -5216,7 +5213,7 @@ window.restoreHospitalNationalStock = async function() {
                     entry_date: new Date().toISOString().split('T')[0]
                 });
                 // medMap will be updated after insert
-                medMap[key] = 'pending'; 
+                medMap[key] = 'pending';
             }
         });
 
@@ -5236,10 +5233,10 @@ window.restoreHospitalNationalStock = async function() {
         }));
 
         await _supabase.from('pharmacy_stock').upsert(stockUpserts, { onConflict: 'pharmacy_id,medicine_id' });
-        
+
         window.showToast("Stock restauré avec succès !");
         window.renderPharmacy(4);
-    } catch(err) {
+    } catch (err) {
         console.error(err);
         window.showToast("Erreur lors de la restauration", "error");
     }
