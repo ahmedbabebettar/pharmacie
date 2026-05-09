@@ -9,14 +9,16 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&family=Inter:wght@400;600;800&display=swap"
         rel="stylesheet">
-    <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- FontAwesome 6.4.0 (pinned) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer">
     <!-- CSS -->
     <link rel="stylesheet" href="text.css?v=44">
     <!-- SheetJS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- html2pdf for PDF Generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- SheetJS and html2pdf are loaded lazily on first use (see app.js window.loadXLSX / window.loadPDF) -->
+    <!-- CVE-2023-30533 fix: removed static SheetJS 0.18.5 load; dynamic load uses 0.19.3 -->
+    <!-- html2pdf 0.10.1 kept as lazy load to avoid blocking TTI -->
     <script>
         // Global Error Firewall: Catches syntax errors if app.js fails to load
         window.addEventListener('error', function(e) {
@@ -33,7 +35,13 @@
                 banner.style = "position:fixed; top:0; left:0; width:100%; background:#ef4444; color:white; text-align:center; padding:10px; z-index:9999; font-weight:bold; font-family:sans-serif;";
                 document.body.prepend(banner);
             }
-            banner.innerHTML = `⚠️ Erreur (L.${e.lineno}): ${e.message} <button onclick="window.location.reload(true)" style="margin-left:15px; padding:4px 8px; cursor:pointer;">Rafraîchir (Ctrl+F5)</button>`;
+            // SAFE: textContent prevents XSS from error message strings
+            banner.textContent = '⚠️ Erreur (L.' + e.lineno + '): ' + e.message;
+            const _errBtn = document.createElement('button');
+            _errBtn.textContent = 'Rafraîchir (Ctrl+F5)';
+            _errBtn.style.cssText = 'margin-left:15px; padding:4px 8px; cursor:pointer;';
+            _errBtn.onclick = function() { window.location.reload(true); };
+            banner.appendChild(_errBtn);
         });
     </script>
 </head>
@@ -322,8 +330,17 @@
         </div>
     </div>
 
+    <!-- Security: DOM sanitization (must load before app.js) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"
+        integrity="sha384-nszIONF2FGC59kn+pPFaRa6WUNGwsZgXZiJxJwQbym+TzcH7smolUviLgpPbNx7V"
+        crossorigin="anonymous"></script>
+    <!-- Supabase SDK 2.49.4 (pinned) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"
+        integrity="sha384-2zrRDgDHSYB/GN3nFW3fsZXoxEhKIr3N2h63Tc6DEOB9JJdFIu8xMJT2Cph/gBil"
+        crossorigin="anonymous"></script>
+    <!-- Translations (must load before app.js) -->
+    <script src="translations.js?v=1"></script>
     <!-- Core App Logic -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=169"></script>
+    <script src="app.js?v=170"></script>
 </body>
 </html>
