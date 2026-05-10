@@ -569,7 +569,7 @@ async function loadDataFromSupabase() {
 
         // SCALABILITY: Get real sums for the dashboard using RPC if possible
         let sumMeds = 0;
-        const { data: rpcSum, error: rpcErr } = await _supabase.rpc('get_total_stock');
+        const { data: rpcSum, error: rpcErr } = await rpcGetTotalStock();
 
         if (!rpcErr && rpcSum !== null) {
             sumMeds = parseInt(rpcSum);
@@ -620,7 +620,7 @@ async function loadDataFromSupabase() {
 
         // SCALABILITY: Fetch pharmacy activity stats (patient counts and percentages)
         // RPC is now mandatory to prevent N sequential requests
-        const { data: activityData } = await _supabase.rpc('get_pharmacy_stats');
+        const { data: activityData } = await rpcGetPharmacyStats();
 
         if (activityData) {
             activityData.forEach(row => {
@@ -712,6 +712,23 @@ window.optimisticUpdate = function (action, payload = {}) {
         window.renderView('dashboard');
     }
 };
+
+// Optimistic-update wrapper with automatic rollback on DB failure.
+// Usage: await safeUpdate(() => mutateState(), async () => dbWrite(), snapshot => restoreState(snapshot))
+async function safeUpdate(optimisticFn, dbWriteFn, rollbackFn) {
+    const snapshot = JSON.parse(JSON.stringify(state));
+    optimisticFn();
+    try {
+        const result = await dbWriteFn();
+        if (result?.error) throw result.error;
+    } catch (err) {
+        rollbackFn ? rollbackFn(snapshot) : Object.assign(state, snapshot);
+        window.showToast((typeof i18n !== 'undefined' && i18n[currentLang] && i18n[currentLang].syncFailed) || 'Sync failed — changes reverted', 'error');
+        if (typeof renderCurrentView === 'function') renderCurrentView();
+        else if (typeof activeView !== 'undefined') window.renderView(activeView);
+        console.error('[safeUpdate] rollback triggered:', err);
+    }
+}
 
 
 
@@ -1996,22 +2013,11 @@ window.renderView = async function (viewName) {
                 }
 
                 // FEFO: Get matching batches from local tracking, sorted by expiry
-                const eligibleBatches = localStock.filter(m =>
+                const eligibleBatches = Logic.sortFEFO(localStock.filter(m =>
                     m.name === medName &&
                     m.qty > 0 &&
                     !isExpired(m.expiry)
-                ).sort((a, b) => {
-                    const parseDate = (d) => {
-                        if (!d || d === '-') return new Date(8640000000000000);
-                        const parts = d.split('T')[0].split(/[-/]/);
-                        if (parts.length === 3) {
-                            if (parts[0].length === 4) return new Date(parts[0], parts[1] - 1, parts[2]);
-                            if (parts[2].length === 4) return new Date(parts[2], parts[1] - 1, parts[0]);
-                        }
-                        return new Date(d);
-                    };
-                    return parseDate(a.expiry) - parseDate(b.expiry);
-                });
+                ));
 
                 const totalAvailable = eligibleBatches.reduce((acc, curr) => acc + curr.qty, 0);
 
@@ -2061,14 +2067,12 @@ window.renderView = async function (viewName) {
                     }
                 }
 
-                for (const b of eligibleBatches) {
-                    if (remaining <= 0) break;
-                    const take = Math.min(b.qty, remaining);
-                    batch.push({ medId: b.id, qty: take, medName: b.name, batch: b.batch, expiry: b.expiry });
-
-                    // Deduct from local tracking so we don't double-count in next rows
-                    b.qty -= take;
-                    remaining -= take;
+                const decrements = Logic.calculateFEFODecrement(eligibleBatches, remaining);
+                if (!decrements) { valid = false; break; }
+                for (const d of decrements) {
+                    const b = eligibleBatches.find(x => x.id === d.id);
+                    batch.push({ medId: b.id, qty: d.take, medName: b.name, batch: b.batch, expiry: b.expiry });
+                    b.qty -= d.take; // keep local tracking accurate for next rows
                 }
             }
 
@@ -2081,7 +2085,7 @@ window.renderView = async function (viewName) {
                 // Prevents partial failure (central decremented but pharmacy not credited)
                 const workerName = typeof currentUser.name === 'object' ? currentUser.name.fr : currentUser.name;
                 const transferResults = await Promise.all(batch.map(item =>
-                    _supabase.rpc('transfer_stock', {
+                    rpcTransferStock({
                         p_medicine_id: item.medId,
                         p_pharmacy_id: pharmId,
                         p_qty: item.qty,
@@ -3529,22 +3533,11 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
                 }
 
                 // FEFO for Pharmacy Stock
-                const eligibleBatches = localPStock.filter(m =>
+                const eligibleBatches = Logic.sortFEFO(localPStock.filter(m =>
                     m.name === medName &&
                     m.qty > 0 &&
                     !isExpired(m.expiry)
-                ).sort((a, b) => {
-                    const parseDate = (d) => {
-                        if (!d || d === '-') return new Date(8640000000000000);
-                        const parts = d.split('T')[0].split(/[-/]/);
-                        if (parts.length === 3) {
-                            if (parts[0].length === 4) return new Date(parts[0], parts[1] - 1, parts[2]);
-                            if (parts[2].length === 4) return new Date(parts[2], parts[1] - 1, parts[0]);
-                        }
-                        return new Date(d);
-                    };
-                    return parseDate(a.expiry) - parseDate(b.expiry);
-                });
+                ));
 
                 const totalAvailable = eligibleBatches.reduce((acc, curr) => acc + curr.qty, 0);
 
@@ -3592,14 +3585,12 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
                     }
                 }
 
-                for (const b of eligibleBatches) {
-                    if (remaining <= 0) break;
-                    const take = Math.min(b.qty, remaining);
-                    items.push({ medId: b.id, qty: take, medName: b.name, batch: b.batch, expiry: b.expiry });
-
-                    // Deduct from local tracking
-                    b.qty -= take;
-                    remaining -= take;
+                const decrements = Logic.calculateFEFODecrement(eligibleBatches, remaining);
+                if (!decrements) { valid = false; break; }
+                for (const d of decrements) {
+                    const b = eligibleBatches.find(x => x.id === d.id);
+                    items.push({ medId: b.id, qty: d.take, medName: b.name, batch: b.batch, expiry: b.expiry });
+                    b.qty -= d.take; // keep local tracking accurate for next rows
                 }
             }
 
@@ -3832,18 +3823,12 @@ window.deletePatient = async function (id) {
         icon: 'fa-trash-can'
     });
     if (confirm) {
-        try {
-            // Soft delete: set deleted_at timestamp, preserve dispensation history
-            const { error } = await _supabase.from('patients')
-                .update({ deleted_at: new Date().toISOString() })
-                .eq('id', id);
-            if (error) throw error;
-            window.optimisticUpdate('patient_deleted', { id: id });
-            window.renderView('patients');
-        } catch (err) {
-            console.error(err);
-            window.showToast("Erreur lors de la suppression du patient", "error");
-        }
+        await safeUpdate(
+            () => window.optimisticUpdate('patient_deleted', { id }),
+            () => softDeletePatient(id),
+            (snap) => { state.stats = snap.stats; }
+        );
+        window.renderView('patients');
     }
 };
 
@@ -3920,7 +3905,7 @@ window.deleteMedicine = async function (id) {
     const confirm = await window.showCustomDialog({ title: "Suppression", msg: t('confirm_delete'), type: 'confirm', icon: 'fa-trash-can' });
     if (confirm) {
         try {
-            await _supabase.from('medicines').delete().eq('id', id);
+            await deleteMedicine(id);
             window.optimisticUpdate('central_stock_change');
             window.renderView('central');
         } catch (err) { console.error(err); }
@@ -4004,10 +3989,7 @@ window.approveReturn = async function (reqId) {
             : 'Admin';
 
         // Single atomic RPC — prevents partial failure between pharmacy debit and central credit
-        const { data: result, error } = await _supabase.rpc('approve_return', {
-            p_return_id: reqId,
-            p_approved_by: approvedBy
-        });
+        const { data: result, error } = await rpcApproveReturn(reqId, approvedBy);
 
         if (error) throw error;
 
@@ -4037,10 +4019,7 @@ window.rejectReturn = async function (reqId) {
             ? (typeof currentUser.name === 'object' ? currentUser.name.fr : currentUser.name)
             : 'Admin';
 
-        const { data: result, error } = await _supabase.rpc('reject_return', {
-            p_return_id: reqId,
-            p_rejected_by: rejectedBy
-        });
+        const { data: result, error } = await rpcRejectReturn(reqId, rejectedBy);
 
         if (error) throw error;
 
@@ -4066,16 +4045,14 @@ window.markOrderTreated = async function (orderId) {
         icon: 'fa-clipboard-check'
     });
     if (confirm) {
-        try {
-            await _supabase.from('orders').update({ status: 'TREATED' }).eq('id', orderId);
-            window.optimisticUpdate('order_processed', { id: orderId });
-            window.showToast("Commande marquée comme Traitée.");
-            if (activeView === 'admin_orders') {
-                window.renderView('admin_orders');
-            } else {
-                window.renderView('dashboard');
-            }
-        } catch (err) { console.error(err); }
+        await safeUpdate(
+            () => window.optimisticUpdate('order_processed', { id: orderId }),
+            () => updateOrderStatus(orderId, 'TREATED'),
+            (snap) => { state.orders = snap.orders; state.counters = snap.counters; }
+        );
+        window.showToast("Commande marquée comme Traitée.");
+        if (activeView === 'admin_orders') window.renderView('admin_orders');
+        else window.renderView('dashboard');
     }
 };
 
