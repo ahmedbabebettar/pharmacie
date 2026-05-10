@@ -2230,6 +2230,23 @@ window.renderView = async function (viewName) {
             });
             pState.total = total;
 
+            // Fetch dispensation summary for visible patients (last medicine + total qty)
+            const dispByPatient = {};
+            if (currentPats.length > 0) {
+                const patientNames = currentPats.map(p => p.name);
+                const { data: dispRows } = await _supabase
+                    .from('dispensations')
+                    .select('patient_name, medicine_name, qty, date')
+                    .in('patient_name', patientNames)
+                    .order('date', { ascending: false });
+                (dispRows || []).forEach(d => {
+                    if (!dispByPatient[d.patient_name]) {
+                        dispByPatient[d.patient_name] = { lastMed: d.medicine_name, total: 0 };
+                    }
+                    dispByPatient[d.patient_name].total += (d.qty || 0);
+                });
+            }
+
             const pRows = currentPats.map(p => {
                 let actions = '';
                 let checkbox = '';
@@ -2242,14 +2259,15 @@ window.renderView = async function (viewName) {
                         </td>
                     `;
                 }
+                const pDisp = dispByPatient[p.name];
                 return `<tr>
                     ${checkbox}
                     <td><strong>${p.name}</strong></td>
                     <td>${p.national_id || '-'}</td>
                     <td dir="ltr">${p.phone || '-'}</td>
                     <td>${p.hospital || '-'}</td>
-                    <td>---</td>
-                    <td>---</td>
+                    <td>${pDisp ? pDisp.lastMed : '-'}</td>
+                    <td>${pDisp ? pDisp.total : '-'}</td>
                     ${actions}
                 </tr>`;
             }).join('');
