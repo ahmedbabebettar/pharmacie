@@ -604,6 +604,9 @@ async function loadDataFromSupabase() {
 }
 
 // Optimistic State Update Helper
+// Debounce timer: collapses multiple rapid central_stock_change calls into one reload
+let _stockReloadTimer = null;
+
 window.optimisticUpdate = function (action, payload = {}) {
     if (!state.stats) return;
 
@@ -646,12 +649,15 @@ window.optimisticUpdate = function (action, payload = {}) {
             if (state.transfers.length > 6) state.transfers.pop();
             break;
         case 'central_stock_change':
-            // For complex central stock changes, trigger background reload and then update UI
-            loadDataFromSupabase().then(() => {
-                if (typeof activeView !== 'undefined' && activeView === 'dashboard') {
-                    window.renderView('dashboard');
-                }
-            });
+            // Debounced: multiple rapid calls within 400ms collapse into a single reload
+            clearTimeout(_stockReloadTimer);
+            _stockReloadTimer = setTimeout(() => {
+                loadDataFromSupabase().then(() => {
+                    if (typeof activeView !== 'undefined' && activeView === 'dashboard') {
+                        window.renderView('dashboard');
+                    }
+                });
+            }, 400);
             return;
     }
 
@@ -1358,7 +1364,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!email) return;
 
         try {
-            const { data, error } = await _supabase.from('user_security').select('*').eq('login_email', email.toLowerCase().trim()).single();
+            const { data, error } = await _supabase.from('user_security').select('recovery_email, recovery_phone').eq('login_email', email.toLowerCase().trim()).single();
             if (error || !data) {
                 window.showCustomDialog({
                     title: "Oups",
@@ -1387,7 +1393,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Try to pre-load existing data
         const loginEmail = Object.keys(userDatabase).find(k => userDatabase[k] === currentUser);
-        const { data } = await _supabase.from('user_security').select('*').eq('login_email', loginEmail).single();
+        const { data } = await _supabase.from('user_security').select('recovery_email, recovery_phone').eq('login_email', loginEmail).single();
         if (data) {
             document.getElementById('recov-email').value = data.recovery_email || '';
             document.getElementById('recov-phone').value = data.recovery_phone || '';
@@ -1917,7 +1923,7 @@ window.renderView = async function (viewName) {
             if (medNamesRequested.length === 0) return;
 
             const { data: dbStock, error: dbErr } = await _supabase.from('medicines')
-                .select('*')
+                .select('id, name, batch, qty, expiry_date')
                 .in('name', medNamesRequested)
                 .gt('qty', 0);
 
@@ -2027,16 +2033,17 @@ window.renderView = async function (viewName) {
                 // Fetch current pharmacy stock for these medicines to calculate new totals correctly
                 const medIds = batch.map(b => b.medId);
                 const { data: pStockData } = await _supabase.from('pharmacy_stock')
-                    .select('*')
+                    .select('medicine_id, qty')
                     .eq('pharmacy_id', pharmId)
                     .in('medicine_id', medIds);
 
                 const pStockMap = {};
                 if (pStockData) pStockData.forEach(ps => pStockMap[ps.medicine_id] = ps.qty);
 
-                // Optimized Parallel Execution
+                // Optimized Parallel Execution — Map for O(1) lookup instead of O(n) find()
+                const dbStockMap = new Map(dbStock.map(m => [m.id, m]));
                 const medicineUpdates = batch.map(item => {
-                    const med = dbStock.find(m => m.id === item.medId);
+                    const med = dbStockMap.get(item.medId);
                     return _supabase.from('medicines').update({ qty: med.qty - item.qty }).eq('id', item.medId);
                 });
 
@@ -3470,7 +3477,7 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
             let matchedPatient = null;
             if (patientInput) {
                 const { data: ptData } = await _supabase.from('patients')
-                    .select('*')
+                    .select('id, name, national_id, phone, hospital')
                     .or(`name.eq."${patientInput}",national_id.eq."${patientInput}"`)
                     .limit(1);
                 if (ptData && ptData.length > 0) matchedPatient = ptData[0];
@@ -3480,7 +3487,7 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
                 // If not found by exact match, try a more flexible check if the input format is "Name (ID)"
                 if (patientInput.includes(' (')) {
                     const namePart = patientInput.split(' (')[0];
-                    const { data: ptData2 } = await _supabase.from('patients').select('*').eq('name', namePart).limit(1);
+                    const { data: ptData2 } = await _supabase.from('patients').select('id, name, national_id, phone, hospital').eq('name', namePart).limit(1);
                     if (ptData2 && ptData2.length > 0) matchedPatient = ptData2[0];
                 }
             }
@@ -3797,7 +3804,7 @@ window.openPatientModal = async function (id = null) {
         title.innerText = currentLang === 'ar' ? 'تعديل مريض' : 'Modifier le Patient';
         window.updateSyncStatus('syncing');
         try {
-            const { data: p } = await _supabase.from('patients').select('*').eq('id', id).single();
+            const { data: p } = await _supabase.from('patients').select('name, national_id, phone, hospital').eq('id', id).single();
             if (!p) return;
             document.getElementById('patient-name-input').value = p.name || '';
             document.getElementById('patient-nid-input').value = p.national_id || '';
@@ -3913,7 +3920,7 @@ window.deleteMedicine = async function (id) {
 };
 
 window.editMedicine = async function (id) {
-    const { data: med } = await _supabase.from('medicines').select('*').eq('id', id).single();
+    const { data: med } = await _supabase.from('medicines').select('name, batch, qty, entry_date, expiry_date, price').eq('id', id).single();
     if (!med) return;
 
     document.getElementById('med-name').value = med.name;
@@ -4841,6 +4848,9 @@ if (_supabase) {
 // =============================================
 // REAL-TIME: Listen for new orders from pharmacies
 // =============================================
+// Tracks whether the WebSocket channel is active so polling can stand down
+let _realtimeActive = false;
+
 if (_supabase) {
     _supabase
         .channel('orders-realtime')
@@ -4875,12 +4885,14 @@ if (_supabase) {
         })
         .subscribe((status) => {
             console.log('Realtime subscription status:', status);
+            // Mark realtime as active so the polling fallback stands down
+            _realtimeActive = (status === 'SUBSCRIBED');
         });
 }
 
 // =============================================
 // POLLING FALLBACK: Check for new orders every 30s
-// (Works even if Realtime WebSocket fails)
+// Only fires when Realtime WebSocket is NOT connected
 // =============================================
 let lastKnownOrderCount = 0;
 
@@ -4903,6 +4915,8 @@ setInterval(async () => {
     // Only poll if admin/manager is logged in
     if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) return;
     if (!_supabase) return;
+    // Stand down if Realtime WebSocket is handling notifications
+    if (_realtimeActive) return;
 
     try {
         const { data } = await _supabase.from('orders').select('id').eq('status', 'PENDING');
