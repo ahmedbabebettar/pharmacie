@@ -4930,37 +4930,17 @@ window.consolidateStock = async function () {
     if (confirm) {
         window.showToast("Consolidation en cours...", "info");
         try {
-            const { data: allMeds } = await _supabase.from('medicines').select('*');
-            if (!allMeds) return;
+            const { data: result, error } = await _supabase.rpc('consolidate_central_stock');
+            if (error) throw error;
 
-            const map = {};
-            const toDelete = [];
-            const toUpdate = [];
-
-            allMeds.forEach(m => {
-                const key = `${String(m.name).toLowerCase().trim()}|${String(m.batch).toLowerCase().trim()}`;
-                if (!map[key]) {
-                    map[key] = { ...m };
-                } else {
-                    map[key].qty += (m.qty || 0);
-                    toDelete.push(m.id);
-                    if (!toUpdate.find(u => u.id === map[key].id)) {
-                        toUpdate.push(map[key]);
-                    }
-                }
-            });
-
-            if (toUpdate.length > 0) {
-                for (const m of toUpdate) {
-                    await _supabase.from('medicines').update({ qty: m.qty }).eq('id', m.id);
-                }
-            }
-            if (toDelete.length > 0) {
-                await _supabase.from('medicines').delete().in('id', toDelete);
-            }
-
+            const merged  = result?.groups_merged ?? 0;
+            const deleted = result?.rows_deleted   ?? 0;
             window.optimisticUpdate('central_stock_change');
-            window.showToast("Stock consolidé avec succès !");
+            window.showToast(
+                merged === 0
+                    ? "Aucun doublon trouvé."
+                    : `${merged} groupe(s) fusionné(s), ${deleted} ligne(s) supprimée(s).`
+            );
             window.renderView('dashboard');
         } catch (err) {
             console.error(err);
@@ -5097,36 +5077,18 @@ window.consolidatePharmacyStock = async function (pharmId) {
 
     window.showToast("Consolidation...", "info");
     try {
-        const { data: allItems } = await _supabase.from('pharmacy_stock').select('*').eq('pharmacy_id', pharmId);
-        if (!allItems || allItems.length === 0) return;
-
-        const map = {};
-        const toDelete = [];
-        const toUpdate = [];
-
-        allItems.forEach(item => {
-            const key = item.medicine_id;
-            if (!map[key]) {
-                map[key] = { ...item };
-            } else {
-                map[key].qty += item.qty;
-                toDelete.push(item.id);
-                if (!toUpdate.find(u => u.id === map[key].id)) {
-                    toUpdate.push(map[key]);
-                }
-            }
+        const { data: result, error } = await _supabase.rpc('consolidate_pharmacy_stock', {
+            p_pharmacy_id: pharmId
         });
+        if (error) throw error;
 
-        if (toUpdate.length > 0) {
-            for (const item of toUpdate) {
-                await _supabase.from('pharmacy_stock').update({ qty: item.qty }).eq('id', item.id);
-            }
-        }
-        if (toDelete.length > 0) {
-            await _supabase.from('pharmacy_stock').delete().in('id', toDelete);
-        }
-
-        window.showToast("Terminé !");
+        const merged  = result?.groups_merged ?? 0;
+        const deleted = result?.rows_deleted   ?? 0;
+        window.showToast(
+            merged === 0
+                ? "Aucun doublon trouvé."
+                : `${merged} groupe(s) fusionné(s), ${deleted} ligne(s) supprimée(s).`
+        );
         window.renderPharmacy(pharmId);
     } catch (err) {
         console.error(err);
