@@ -5302,14 +5302,11 @@ window.restoreHospitalNationalStock = async function () {
 // =============================================
 window.showPatientHistory = async function (patientId, patientName) {
     const modal = document.getElementById('patient-history-modal');
-    const title = document.getElementById('patient-history-title').querySelector('span');
-    const body  = document.getElementById('patient-history-body');
+    const titleSpan = document.getElementById('patient-history-title').querySelector('span');
+    const body = document.getElementById('patient-history-body');
 
-    // Show modal with spinner immediately
-    title.textContent = patientName;
-    body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted);">
-        <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
-    </div>`;
+    titleSpan.textContent = patientName;
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin fa-2x"></i></div>';
     modal.classList.add('active');
 
     try {
@@ -5322,73 +5319,63 @@ window.showPatientHistory = async function (patientId, patientName) {
 
         if (error) throw error;
 
-        const rows = (data || []);
+        const rows = data || [];
+
         if (rows.length === 0) {
-            body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted);">
-                <i class="fa-solid fa-folder-open fa-2x" style="margin-bottom:12px;"></i>
-                <p>${currentLang === 'ar' ? 'لا توجد صرفيات مسجلة لهذا المريض.' : 'Aucune délivrance enregistrée pour ce patient.'}</p>
-            </div>`;
+            const emptyMsg = currentLang === 'ar'
+                ? 'لا توجد صرفيات مسجلة لهذا المريض.'
+                : 'Aucune delivrance enregistree pour ce patient.';
+            body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);"><i class="fa-solid fa-folder-open fa-2x" style="margin-bottom:12px;display:block;"></i>' + emptyMsg + '</div>';
             return;
         }
 
-        // Aggregate totals per medicine
         const totals = {};
-        rows.forEach(r => {
+        rows.forEach(function(r) {
             totals[r.medicine_name] = (totals[r.medicine_name] || 0) + (r.qty || 0);
         });
+        const totalQty = rows.reduce(function(s, r) { return s + (r.qty || 0); }, 0);
 
-        const totalQty = rows.reduce((s, r) => s + (r.qty || 0), 0);
+        const tableRows = rows.map(function(r) {
+            var pharmName = (state.pharmacies[r.pharmacy_id] && state.pharmacies[r.pharmacy_id].name)
+                ? state.pharmacies[r.pharmacy_id].name.fr
+                : '-';
+            var worker = window.parseWorkerName(r.dispensed_by, currentLang);
+            var ref = r.reference ? ('PR-' + r.reference) : '-';
+            return '<tr>'
+                + '<td style="white-space:nowrap;">' + window.formatDate(r.date) + '</td>'
+                + '<td><strong>' + r.medicine_name + '</strong></td>'
+                + '<td style="text-align:center;"><span class="status-badge good">' + r.qty + '</span></td>'
+                + '<td>' + pharmName + '</td>'
+                + '<td style="font-size:12px;color:var(--text-muted);">' + worker + '</td>'
+                + '<td style="font-size:11px;color:var(--text-muted);">' + ref + '</td>'
+                + '</tr>';
+        }).join('');
 
-        const tableRows = rows.map(r => `
-            <tr>
-                <td style="white-space:nowrap;">${window.formatDate(r.date)}</td>
-                <td><strong>${r.medicine_name}</strong></td>
-                <td style="text-align:center;"><span class="status-badge good">${r.qty}</span></td>
-                <td>${state.pharmacies[r.pharmacy_id]?.name?.fr || '-'}</td>
-                <td style="font-size:12px;color:var(--text-muted);">${window.parseWorkerName(r.dispensed_by, currentLang)}</td>
-                <td style="font-size:11px;color:var(--text-muted);">PR-${r.reference || '-'}</td>
-            </tr>
-        `).join('');
+        const summaryChips = Object.entries(totals)
+            .sort(function(a, b) { return b[1] - a[1]; })
+            .map(function(entry) {
+                return '<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;border-radius:20px;padding:4px 12px;font-size:13px;margin:2px;">'
+                    + '<strong>' + entry[0] + '</strong>'
+                    + '<span class="status-badge good" style="font-size:11px;">' + entry[1] + '</span>'
+                    + '</span>';
+            }).join('');
 
-        const summaryRows = Object.entries(totals)
-            .sort((a, b) => b[1] - a[1])
-            .map(([med, qty]) => `
-                <span style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;border-radius:20px;padding:4px 12px;font-size:13px;">
-                    <strong>${med}</strong>
-                    <span class="status-badge good" style="font-size:11px;">${qty}</span>
-                </span>
-            `).join('');
+        body.innerHTML = ''
+            + '<div style="padding:16px 4px 8px;">'
+            + '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">' + summaryChips + '</div>'
+            + '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">'
+            + rows.length + ' delivrance(s) &mdash; Total: <strong>' + totalQty + '</strong> unite(s)'
+            + '</div>'
+            + '</div>'
+            + '<div class="table-container" style="max-height:420px;overflow-y:auto;">'
+            + '<table>'
+            + '<thead><tr><th>Date</th><th>Medicament</th><th style="text-align:center;">Qte</th><th>Pharmacie</th><th>Staff</th><th>Ref.</th></tr></thead>'
+            + '<tbody>' + tableRows + '</tbody>'
+            + '</table>'
+            + '</div>';
 
-        body.innerHTML = `
-            <div style="padding:16px 4px 8px;">
-                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
-                    ${summaryRows}
-                </div>
-                <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
-                    ${rows.length} délivrance(s) — Total: <strong>${totalQty}</strong> unité(s)
-                </div>
-            </div>
-            <div class="table-container" style="max-height:420px;overflow-y:auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Médicament</th>
-                            <th style="text-align:center;">Qté</th>
-                            <th>Pharmacie</th>
-                            <th>Staff</th>
-                            <th>Réf.</th>
-                        </tr>
-                    </thead>
-                    <tbody>${tableRows}</tbody>
-                </table>
-            </div>
-        `;
     } catch (err) {
         console.error('Patient history error:', err);
-        body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--danger-red);">
-            <i class="fa-solid fa-circle-exclamation fa-2x" style="margin-bottom:12px;"></i>
-            <p>Erreur lors du chargement de l'historique.</p>
-        </div>`;
+        body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--danger-red);"><i class="fa-solid fa-circle-exclamation fa-2x" style="margin-bottom:12px;display:block;"></i>Erreur lors du chargement.</div>';
     }
 };
