@@ -4515,11 +4515,16 @@ window.deleteUser = async function (email) {
 
     if (confirm) {
         try {
-            await _supabase.from('users').delete().eq('email', email);
+            const { data: result, error } = await _supabase.rpc('delete_user_by_email', { p_email: email });
+            if (error) throw error;
+            if (result && result.success === false) throw new Error(result.error || 'Echec suppression');
             await syncUsers();
             window.renderView('users');
             showToast("Utilisateur supprimé");
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            console.error(e);
+            window.showToast('Erreur suppression : ' + (e.message || e), 'error');
+        }
     }
 };
 
