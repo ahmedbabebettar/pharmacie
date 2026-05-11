@@ -322,8 +322,28 @@
         </div>
     </div>
 
+    <!-- Patient History Modal -->
+    <div id="patient-history-modal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('active')">
+        <div class="modal-content" style="max-width:750px; width:95%;">
+            <div class="modal-header">
+                <h3 id="patient-history-title" style="display:flex;align-items:center;gap:10px;">
+                    <i class="fa-solid fa-clock-rotate-left" style="color:var(--primary-brand);"></i>
+                    <span>Historique des délivrances</span>
+                </h3>
+                <button class="close-modal" onclick="document.getElementById('patient-history-modal').classList.remove('active')">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div id="patient-history-body" style="padding:0 4px;">
+                <div style="text-align:center;padding:40px;color:var(--text-muted);">
+                    <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Core App Logic -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=169"></script>
+    <script src="app.js?v=172"></script>
 </body>
 </html>
