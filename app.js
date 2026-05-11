@@ -787,6 +787,7 @@ window.importPharmacyStock = async function (event, pharmId) {
 
             window.showToast(currentLang === 'ar' ? 'تم الاستيراد بنجاح' : "Importation terminée !");
             window.optimisticUpdate('central_stock_change');
+            window.invalidatePharmacyStockCache(pharmId);
             await window.renderPharmacy(pharmId, 'all');
         } catch (err) {
             console.error("Critical Import Error:", err);
@@ -3061,6 +3062,19 @@ window.handlePatientsImport = function (file) {
     reader.readAsBinaryString(file);
 };
 
+// Per-pharmacy stock cache (10s TTL) — avoids re-fetching on rapid tab switches
+const _pharmStockCache    = {};   // pharmId → allStockData
+const _pharmStockCacheTs  = {};   // pharmId → timestamp
+
+// Central medicines + patients lists cache (60s TTL) — rarely change
+let _pharmListsMeds = null, _pharmListsMedTs = 0;
+let _pharmListsPats = null, _pharmListsPatTs = 0;
+
+// Call this after any write that changes pharmacy stock
+window.invalidatePharmacyStockCache = function (pharmId) {
+    delete _pharmStockCacheTs[pharmId];
+};
+
 window.renderPharmacy = async function (pharmId, subView = 'all') {
     // Track active pharmacy for pagination awareness
     window.activePharmacyId = pharmId;
@@ -3112,21 +3126,28 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
     }
     const pHistoryState = pagination[pHistoryKey];
 
-    // 1. Fetch ALL stock for this pharmacy (up to 50k) to allow local fast filtering
+    // 1. Fetch ALL stock — served from cache for 10s to make tab switches instant
     let allStockData = [];
-    let stockFrom = 0;
-    const stockStep = 1000;
-    while (stockFrom < 50000) {
-        const { data, error } = await _supabase.from('pharmacy_stock')
-            .select('*, medicines(id, name, batch, expiry_date)')
-            .eq('pharmacy_id', pharmId)
-            .range(stockFrom, stockFrom + stockStep - 1);
+    const STOCK_TTL = 10000;
+    if (_pharmStockCache[pharmId] && _pharmStockCacheTs[pharmId] && (Date.now() - _pharmStockCacheTs[pharmId]) < STOCK_TTL) {
+        allStockData = _pharmStockCache[pharmId];
+    } else {
+        let stockFrom = 0;
+        const stockStep = 1000;
+        while (stockFrom < 50000) {
+            const { data, error } = await _supabase.from('pharmacy_stock')
+                .select('*, medicines(id, name, batch, expiry_date)')
+                .eq('pharmacy_id', pharmId)
+                .range(stockFrom, stockFrom + stockStep - 1);
 
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        allStockData = allStockData.concat(data);
-        stockFrom += stockStep;
-        if (data.length < stockStep) break;
+            if (error) throw error;
+            if (!data || data.length === 0) break;
+            allStockData = allStockData.concat(data);
+            stockFrom += stockStep;
+            if (data.length < stockStep) break;
+        }
+        _pharmStockCache[pharmId]   = allStockData;
+        _pharmStockCacheTs[pharmId] = Date.now();
     }
 
     // Update local p.stock cache to support other functions (returns, etc)
@@ -3163,25 +3184,54 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
         qty: ps.qty
     }));
 
-    // 4. Fetch Meta & History in Parallel
+    // 4. Fetch Meta in Parallel
+    // - expiredTotal: computed locally from allStockData (no extra DB call needed)
+    // - history:      fetched only when on history tab
+    // - medicines/patients lists: cached 60s (rarely change)
     const numericId = parseInt(pharmId);
-    const [dispTotal, lowStockTotal, expiredTotal, { data: dispHistory, total: historyTotal }, { data: recentMeds }, { data: recentPats }] = await Promise.all([
-        _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId),
-        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).lt('qty', 50),
-        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).filter('medicine_id', 'in',
-            (await _supabase.from('medicines').select('id').lt('expiry_date', new Date().toISOString().split('T')[0])).data?.map(m => m.id) || []
-        ),
-        fetchTableData('dispensations', {
+    const today = new Date().toISOString().split('T')[0];
+
+    // Compute expired count locally — allStockData already has medicines.expiry_date
+    const expiredLocalCount = allStockData.filter(
+        ps => ps.medicines && ps.medicines.expiry_date && ps.medicines.expiry_date < today
+    ).length;
+    const expiredTotal = { count: expiredLocalCount };
+
+    // History: only fetch when the user is on the history tab
+    let dispHistory = [], historyTotal = 0;
+    if (subView === 'history') {
+        const histResult = await fetchTableData('dispensations', {
             page: pHistoryState.currentPage,
             pageSize: pHistoryState.pageSize,
             search: pHistoryState.search,
             filters: { pharmacy_id: numericId },
             order: { col: 'date', ascending: false }
-        }),
-        _supabase.from('medicines').select('id, name, batch, expiry_date').order('name', { ascending: true }).limit(1000),
-        _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(100)
-    ]);
+        });
+        dispHistory  = histResult.data  || [];
+        historyTotal = histResult.total || 0;
+    }
     pHistoryState.total = historyTotal;
+
+    // Medicines + patients lists: 60s cache — only re-fetch if stale
+    const LISTS_TTL = 60000;
+    if (!_pharmListsMeds || (Date.now() - _pharmListsMedTs) > LISTS_TTL) {
+        const { data } = await _supabase.from('medicines').select('id, name, batch, expiry_date').order('name', { ascending: true }).limit(1000);
+        _pharmListsMeds  = data;
+        _pharmListsMedTs = Date.now();
+    }
+    if (!_pharmListsPats || (Date.now() - _pharmListsPatTs) > LISTS_TTL) {
+        const { data } = await _supabase.from('patients').select('name, national_id').order('name', { ascending: true }).limit(100);
+        _pharmListsPats  = data;
+        _pharmListsPatTs = Date.now();
+    }
+    const recentMeds = _pharmListsMeds;
+    const recentPats = _pharmListsPats;
+
+    // Remaining counts still fetched in parallel (lightweight count-only queries)
+    const [dispTotal, lowStockTotal] = await Promise.all([
+        _supabase.from('dispensations').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId),
+        _supabase.from('pharmacy_stock').select('id', { count: 'exact', head: true }).eq('pharmacy_id', numericId).lt('qty', 50)
+    ]);
 
     // Data for Dispense Datalist (Only valid medicines in stock)
     const searchableStock = (allStockData || []).filter(ps => ps.medicines != null && ps.qty > 0).map(ps => ({
@@ -3680,6 +3730,7 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
 
                 await window.showCustomDialog({ title: "Succès", msg: t('alert_success'), icon: "fa-circle-check" });
                 await window.autoDownloadReceipt('DELIVRANCE', patientName, items, barcode);
+                window.invalidatePharmacyStockCache(pharmId);
                 await window.renderPharmacy(pharmId, 'pharm-dispense');
             } catch (err) {
                 console.error(err);
@@ -3974,6 +4025,7 @@ window.returnToCentral = async function (pharmId, medId) {
 
         // Refresh view
         if (currentUser.role === 'pharmacy') {
+            window.invalidatePharmacyStockCache(pharmId);
             window.renderPharmacy(pharmId, 'all');
         } else {
             window.renderView(activeView);
@@ -4137,6 +4189,7 @@ window.deleteSelectedPharmacyStock = async function (pharmId) {
         const { error } = await _supabase.from('pharmacy_stock').delete().eq('pharmacy_id', pharmId).in('medicine_id', selected);
         if (error) throw error;
 
+        window.invalidatePharmacyStockCache(pharmId);
         await window.renderPharmacy(pharmId);
         window.updateSyncStatus('success');
         showToast(currentLang === 'ar' ? 'تم الحذف بنجاح' : "Articles supprimés avec succès");
@@ -5103,6 +5156,7 @@ window.consolidatePharmacyStock = async function (pharmId) {
                 ? "Aucun doublon trouvé."
                 : `${merged} groupe(s) fusionné(s), ${deleted} ligne(s) supprimée(s).`
         );
+        window.invalidatePharmacyStockCache(pharmId);
         window.renderPharmacy(pharmId);
     } catch (err) {
         console.error(err);
