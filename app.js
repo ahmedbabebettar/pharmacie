@@ -2238,19 +2238,16 @@ window.renderView = async function (viewName) {
             });
             pState.total = total;
 
-            // Fetch dispensation summary for visible patients (last medicine + total qty)
+            // Fetch dispensation total per patient
             const dispByPatient = {};
             if (currentPats.length > 0) {
                 const patientNames = currentPats.map(p => p.name);
                 const { data: dispRows } = await _supabase
                     .from('dispensations')
-                    .select('patient_name, medicine_name, qty, date')
-                    .in('patient_name', patientNames)
-                    .order('date', { ascending: false });
+                    .select('patient_name, qty')
+                    .in('patient_name', patientNames);
                 (dispRows || []).forEach(d => {
-                    if (!dispByPatient[d.patient_name]) {
-                        dispByPatient[d.patient_name] = { lastMed: d.medicine_name, total: 0 };
-                    }
+                    if (!dispByPatient[d.patient_name]) dispByPatient[d.patient_name] = { total: 0 };
                     dispByPatient[d.patient_name].total += (d.qty || 0);
                 });
             }
@@ -2268,18 +2265,21 @@ window.renderView = async function (viewName) {
                     `;
                 }
                 const pDisp = dispByPatient[p.name];
-                const histBtn = `<button class="icon-btn" title="Voir l'historique des délivrances"
-                    style="color:var(--primary-brand);"
-                    onclick="window.showPatientHistory(${p.id}, ${JSON.stringify(p.name)})">
-                    <i class="fa-solid fa-clock-rotate-left"></i>
-                </button>`;
+                const isActif = (p.status || 'actif') === 'actif';
+                const statusBadge = isActif
+                    ? '<span class="status-badge good">Actif</span>'
+                    : '<span class="status-badge" style="background:#fee2e2;color:#dc2626;">Inactif</span>';
+                const statusToggle = (currentUser && currentUser.role === 'admin')
+                    ? `<button class="icon-btn" style="color:${isActif ? '#dc2626' : '#059669'};font-size:12px;" title="${isActif ? 'Désactiver' : 'Activer'}" onclick="window.togglePatientStatus(${p.id}, '${p.status || 'actif'}')"><i class="fa-solid fa-${isActif ? 'ban' : 'circle-check'}"></i></button>`
+                    : '';
+                const histBtn = `<button class="icon-btn" title="Historique (double-clic sur le nom)" style="color:var(--primary-brand);" onclick="window.showPatientHistory(${p.id}, ${JSON.stringify(p.name)})"><i class="fa-solid fa-clock-rotate-left"></i></button>`;
                 return `<tr>
                     ${checkbox}
-                    <td><strong>${p.name}</strong></td>
+                    <td ondblclick="window.showPatientHistory(${p.id}, ${JSON.stringify(p.name)})" style="cursor:pointer;" title="Double-cliquer pour voir l'historique"><strong>${p.name}</strong></td>
                     <td>${p.national_id || '-'}</td>
                     <td dir="ltr">${p.phone || '-'}</td>
                     <td>${p.hospital || '-'}</td>
-                    <td>${pDisp ? pDisp.lastMed : '-'}</td>
+                    <td>${statusBadge} ${statusToggle}</td>
                     <td>${pDisp ? pDisp.total : '-'}</td>
                     <td>${histBtn}</td>
                     ${actions}
@@ -2313,7 +2313,7 @@ window.renderView = async function (viewName) {
                             ${currentUser && currentUser.role === 'admin' ? `<th><input type="checkbox" id="select-all-patients" onchange="window.toggleAllPatients(this)"></th>` : ''}
                             <th>${t('th_patient')}</th><th>${t('th_patient_nid')}</th><th>${t('th_patient_phone')}</th>
                             <th>${t('th_patient_hospital')}</th>
-                            <th>${t('th_med')}</th><th>${t('th_total_qty')}</th>
+                            <th>Statut</th><th>${t('th_total_qty')}</th>
                             <th style="width:48px;"></th>
                             ${currentUser && currentUser.role === 'admin' ? `<th>Actions</th>` : ''}
                         </tr></thead>
@@ -3534,7 +3534,7 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
             let matchedPatient = null;
             if (patientInput) {
                 const { data: ptData } = await _supabase.from('patients')
-                    .select('id, name, national_id, phone, hospital')
+                    .select('id, name, national_id, phone, hospital, status')
                     .or(`name.eq."${patientInput}",national_id.eq."${patientInput}"`)
                     .limit(1);
                 if (ptData && ptData.length > 0) matchedPatient = ptData[0];
@@ -3544,13 +3544,25 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
                 // If not found by exact match, try a more flexible check if the input format is "Name (ID)"
                 if (patientInput.includes(' (')) {
                     const namePart = patientInput.split(' (')[0];
-                    const { data: ptData2 } = await _supabase.from('patients').select('id, name, national_id, phone, hospital').eq('name', namePart).limit(1);
+                    const { data: ptData2 } = await _supabase.from('patients').select('id, name, national_id, phone, hospital, status').eq('name', namePart).limit(1);
                     if (ptData2 && ptData2.length > 0) matchedPatient = ptData2[0];
                 }
             }
 
             if (!matchedPatient) {
                 window.showToast(t('error_unregistered_patient') || "Patient introuvable dans le système. Veuillez d'abord l'enregistrer.", 'error');
+                return;
+            }
+
+            // Bloquer la délivrance si le patient est inactif
+            if (matchedPatient.status === 'inactif') {
+                await window.showCustomDialog({
+                    title: currentLang === 'ar' ? 'مريض غير نشط' : 'Patient Inactif',
+                    msg: currentLang === 'ar'
+                        ? 'هذا المريض غير مفعّل. يرجى مراجعة المدير لإعادة تفعيله.'
+                        : 'Ce patient est inactif. Contactez l\'administrateur pour le réactiver.',
+                    icon: 'fa-ban'
+                });
                 return;
             }
 
@@ -3879,6 +3891,28 @@ window.openPatientModal = async function (id = null) {
 
 window.editPatient = function (id) {
     window.openPatientModal(id);
+};
+
+window.togglePatientStatus = async function (id, currentStatus) {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    const newStatus = currentStatus === 'actif' ? 'inactif' : 'actif';
+    const label = newStatus === 'inactif' ? 'désactiver' : 'réactiver';
+    const confirmed = await window.showCustomDialog({
+        title: 'Confirmation',
+        msg: 'Voulez-vous ' + label + ' ce patient ?',
+        type: 'confirm',
+        icon: newStatus === 'inactif' ? 'fa-ban' : 'fa-circle-check'
+    });
+    if (!confirmed) return;
+    try {
+        const { error } = await _supabase.from('patients').update({ status: newStatus }).eq('id', id);
+        if (error) throw error;
+        window.renderView('patients');
+        window.showToast('Patient ' + (newStatus === 'actif' ? 'réactivé' : 'désactivé'));
+    } catch (e) {
+        console.error(e);
+        window.showToast('Erreur : ' + (e.message || e), 'error');
+    }
 };
 
 window.deletePatient = async function (id) {
