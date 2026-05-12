@@ -3983,9 +3983,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const payload = { name, national_id: nid, phone, hospital };
 
                 if (id) {
-                    await _supabase.from('patients').update(payload).eq('id', id);
+                    const { error: updErr } = await _supabase.from('patients').update(payload).eq('id', id);
+                    if (updErr) throw updErr;
                 } else {
-                    await _supabase.from('patients').insert([payload]);
+                    const { error: insErr } = await _supabase.from('patients').insert([payload]);
+                    if (insErr) throw insErr;
                 }
 
                 if (!id) window.optimisticUpdate('patient_added');
