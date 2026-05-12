@@ -2272,10 +2272,10 @@ window.renderView = async function (viewName) {
                 const statusToggle = (currentUser && currentUser.role === 'admin')
                     ? `<button class="icon-btn" style="color:${isActif ? '#dc2626' : '#059669'};font-size:12px;" title="${isActif ? 'Désactiver' : 'Activer'}" onclick="window.togglePatientStatus(${p.id}, '${p.status || 'actif'}')"><i class="fa-solid fa-${isActif ? 'ban' : 'circle-check'}"></i></button>`
                     : '';
-                const histBtn = `<button class="icon-btn" title="Historique (double-clic sur le nom)" style="color:var(--primary-brand);" onclick="window.showPatientHistory(${p.id}, ${JSON.stringify(p.name)})"><i class="fa-solid fa-clock-rotate-left"></i></button>`;
-                return `<tr>
+                const histBtn = `<button class="icon-btn" title="Historique (double-clic sur le nom)" style="color:var(--primary-brand);" onclick="window.showPatientHistory(${p.id})"><i class="fa-solid fa-clock-rotate-left"></i></button>`;
+                return `<tr data-pid="${p.id}">
                     ${checkbox}
-                    <td ondblclick="window.showPatientHistory(${p.id}, ${JSON.stringify(p.name)})" style="cursor:pointer;" title="Double-cliquer pour voir l'historique"><strong>${p.name}</strong></td>
+                    <td ondblclick="window.showPatientHistory(${p.id})" style="cursor:pointer;" title="Double-cliquer pour voir l'historique"><strong>${p.name}</strong></td>
                     <td>${p.national_id || '-'}</td>
                     <td dir="ltr">${p.phone || '-'}</td>
                     <td>${p.hospital || '-'}</td>
@@ -5339,16 +5339,21 @@ window.restoreHospitalNationalStock = async function () {
 // =============================================
 // PATIENT HISTORY: Read-only dispensation log
 // =============================================
-window.showPatientHistory = async function (patientId, patientName) {
+window.showPatientHistory = async function (patientId) {
     const modal = document.getElementById('patient-history-modal');
     const titleSpan = document.getElementById('patient-history-title').querySelector('span');
     const body = document.getElementById('patient-history-body');
 
-    titleSpan.textContent = patientName;
+    titleSpan.textContent = '...';
     body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin fa-2x"></i></div>';
     modal.classList.add('active');
 
     try {
+        // Récupérer le nom depuis la DB (évite les problèmes d'échappement dans les attributs HTML)
+        const { data: patData } = await _supabase.from('patients').select('name').eq('id', patientId).single();
+        const patientName = patData ? patData.name : String(patientId);
+        titleSpan.textContent = patientName;
+
         const { data, error } = await _supabase
             .from('dispensations')
             .select('date, medicine_name, qty, pharmacy_id, dispensed_by, reference')
