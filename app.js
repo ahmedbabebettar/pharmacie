@@ -580,8 +580,26 @@ async function loadDataFromSupabase() {
             });
         }
 
-        // Map Pending Returns
-        state.pendingReturns = returns.data || [];
+        // Map Pending Returns — normaliser snake_case → camelCase
+        const mapReturn = r => ({
+            id: r.id,
+            pharmacyId: r.pharmacy_id,
+            medId: r.medicine_id,
+            medName: r.med_name,
+            qty: r.qty,
+            workerName: r.worker_name,
+            status: r.status,
+            date: r.created_at
+        });
+        state.pendingReturns = (returns.data || []).map(mapReturn);
+
+        // Charger aussi l'historique (APPROVED + REJECTED) pour la vue admin_returns
+        const { data: allReturnsData } = await _supabase
+            .from('return_requests').select('*')
+            .neq('status', 'PENDING')
+            .order('id', { ascending: false })
+            .limit(200);
+        state.allReturns = (allReturnsData || []).map(mapReturn);
 
         // Fetch recent transfers for dashboard
         const { data: recentTrans } = await _supabase.from('transfers').select('*').order('date', { ascending: false }).limit(6);
@@ -4080,7 +4098,7 @@ window.returnToCentral = async function (pharmId, medId) {
 };
 
 window.approveReturn = async function (reqId) {
-    const req = (state.allReturns || []).find(r => r.id === reqId);
+    const req = (state.pendingReturns || []).find(r => r.id === reqId);
     if (!req) return;
 
     try {
