@@ -3548,6 +3548,8 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
         dispForm.dataset.listenerAttached = 'true';
         dispForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (dispForm.dataset.submitting === 'true') return;
+            dispForm.dataset.submitting = 'true';
             const patientInput = document.getElementById(`disp-patient-${pharmId}`).value.trim();
 
             // Scalability: Fetch patient from DB instead of relying on potentially incomplete state.patients
@@ -3774,6 +3776,7 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
             } catch (err) {
                 console.error(err);
                 window.showToast("Erreur lors de la délivrance", "error");
+                dispForm.dataset.submitting = 'false';
             }
         });
     }
