@@ -1431,6 +1431,8 @@ window.changePage = function (view, page) {
     // Pharmacy-specific pagination needs renderPharmacy, not renderView
     if ((view.startsWith('pharmacy_') || view === 'dispensations') && window.activePharmacyId) {
         window.renderPharmacy(window.activePharmacyId, window.activeSubView || 'all');
+    } else if (view === 'analytical_global' || view === 'analytical_pharm') {
+        window.renderView('analytical_reports');
     } else {
         window.renderView(view);
     }
