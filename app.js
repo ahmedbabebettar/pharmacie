@@ -2618,52 +2618,14 @@ window.renderView = async function (viewName) {
         else if (timeframe === 'year') startDate.setFullYear(startDate.getFullYear() - 1); // Show last year
 
         const isoStart = startDate.toISOString().split('T')[0];
-        // RPC contourne la limite max-rows de PostgREST (1000 lignes par défaut)
-        const { data: reportData } = await _supabase.rpc('get_analytics_dispensations', { p_start: isoStart });
-        const dispensations = reportData || [];
 
-        // Grouping 1 (By Pharmacy)
-        const groups = {};
-        // Grouping 2 (Global by Medicine)
-        const globalMedGroups = {};
-
-        dispensations.forEach(d => {
-            const key = getGroupedKey(d.date, timeframe);
-            const pId = d.pharmacy_id || d.pharmacyId;
-            const mName = d.medicine_name || d.medName;
-            const pName = d.patient_name || d.patientName;
-            const qty = d.qty;
-
-            // For Pharmacy Details
-            if (!groups[key]) groups[key] = {};
-            if (!groups[key][pId]) groups[key][pId] = { patients: new Set(), meds: {} };
-            groups[key][pId].patients.add(pName);
-            if (!groups[key][pId].meds[mName]) groups[key][pId].meds[mName] = 0;
-            groups[key][pId].meds[mName] += qty;
-
-            // For Global Medicine Report
-            if (!globalMedGroups[key]) globalMedGroups[key] = {};
-            if (!globalMedGroups[key][mName]) globalMedGroups[key][mName] = { qty: 0, patients: new Set() };
-            globalMedGroups[key][mName].qty += qty;
-            globalMedGroups[key][mName].patients.add(pName);
-        });
-
-        const sortedPeriods = Object.keys(groups).sort((a, b) => new Date(b) - new Date(a));
-
-        // Flatten for pagination
-        const flatPharmRows = [];
-        sortedPeriods.forEach(pKey => {
-            Object.keys(groups[pKey]).forEach(pId => {
-                flatPharmRows.push({ pKey, pId, data: groups[pKey][pId] });
-            });
-        });
-        const flatGlobalRows = [];
-        sortedPeriods.forEach(pKey => {
-            const meds = globalMedGroups[pKey];
-            Object.keys(meds).forEach(mName => {
-                flatGlobalRows.push({ pKey, mName, data: meds[mName] });
-            });
-        });
+        // Agrégation 100% SQL — fiable, sans limite de lignes, sans groupement JS
+        const [pharmRes, globalRes] = await Promise.all([
+            _supabase.rpc('get_analytics_pharm',  { p_start: isoStart, p_timeframe: timeframe }),
+            _supabase.rpc('get_analytics_global', { p_start: isoStart, p_timeframe: timeframe })
+        ]);
+        const flatPharmRows  = pharmRes.data  || [];
+        const flatGlobalRows = globalRes.data || [];
 
         // Update pagination totals
         pagination.analytical_pharm.total = flatPharmRows.length;
@@ -2679,9 +2641,9 @@ window.renderView = async function (viewName) {
         let pharmRows = slicedPharm.map(row => {
             return `
                 <tr>
-                    <td style="white-space:nowrap;"><strong>${window.formatReportPeriod(row.pKey, timeframe)}</strong></td>
-                    <td>${state.pharmacies[row.pId]?.name?.fr || 'Pharmacie #' + row.pId}</td>
-                    <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
+                    <td style="white-space:nowrap;"><strong>${window.formatReportPeriod(row.period_key, timeframe)}</strong></td>
+                    <td>${state.pharmacies[row.pharmacy_id]?.name?.fr || 'Pharmacie #' + row.pharmacy_id}</td>
+                    <td style="text-align:center;"><span class="status-badge info">${row.unique_patients}</span></td>
                 </tr>
             `;
         }).join('');
@@ -2690,10 +2652,10 @@ window.renderView = async function (viewName) {
         let globalRows = slicedGlobal.map(row => {
             return `
                 <tr>
-                    <td style="white-space:nowrap;"><strong>${window.formatReportPeriod(row.pKey, timeframe)}</strong></td>
-                    <td><strong>${row.mName}</strong></td>
-                    <td style="text-align:center;"><span class="status-badge info">${row.data.patients.size}</span></td>
-                    <td style="text-align:center;"><span class="status-badge good">${row.data.qty}</span></td>
+                    <td style="white-space:nowrap;"><strong>${window.formatReportPeriod(row.period_key, timeframe)}</strong></td>
+                    <td><strong>${row.medicine_name}</strong></td>
+                    <td style="text-align:center;"><span class="status-badge info">${row.unique_patients}</span></td>
+                    <td style="text-align:center;"><span class="status-badge good">${row.total_qty}</span></td>
                 </tr>
             `;
         }).join('');
