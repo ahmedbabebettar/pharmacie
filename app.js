@@ -1429,7 +1429,7 @@ window.changePage = function (view, page) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     // Pharmacy-specific pagination needs renderPharmacy, not renderView
-    if ((view.startsWith('pharmacy_') || view === 'dispensations') && window.activePharmacyId) {
+    if ((view.startsWith('pharmacy_') || view.startsWith('history_') || view === 'dispensations') && window.activePharmacyId) {
         window.renderPharmacy(window.activePharmacyId, window.activeSubView || 'all');
     } else if (view === 'analytical_global' || view === 'analytical_pharm') {
         window.renderView('analytical_reports');
