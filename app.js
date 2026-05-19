@@ -1040,10 +1040,6 @@ window.exportCentralStockToExcel = async function () {
         return;
     }
 
-    if (meds.length === 5000) {
-        window.showToast("Note: Export limité aux 5000 premiers articles pour la performance.", "warning");
-    }
-
     const dataToExport = meds.map(m => {
         let statusText = currentLang === 'ar' ? 'جيد' : 'Bon';
         if (m.qty === 0) statusText = currentLang === 'ar' ? 'نافذ' : 'Rupture';
