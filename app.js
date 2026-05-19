@@ -1033,11 +1033,7 @@ async function saveState() {
 window.exportCentralStockToExcel = async function () {
     window.showToast("Préparation du fichier Excel...", "info");
 
-    // Scalability: Fetch top 5000 records for export (fetching millions would crash the browser)
-    const { data: meds, error } = await _supabase.from('medicines')
-        .select('*')
-        .order('name', { ascending: true })
-        .limit(5000);
+    const { data: meds, error } = await _supabase.rpc('get_all_medicines');
 
     if (error || !meds || meds.length === 0) {
         window.showToast(currentLang === 'ar' ? 'المخزون فارغ أو حدث خطأ.' : 'Le stock est vide ou une erreur est survenue.', 'error');
@@ -1795,12 +1791,8 @@ window.renderView = async function (viewName) {
     else if (viewName === 'distribution') {
         pageTitle.innerText = t('page_distribution');
 
-        // Scalability: Fetch a sample of active medicines for the datalist
-        const { data: activeMeds } = await _supabase.from('medicines')
-            .select('id, name, batch, qty, expiry_date')
-            .gt('qty', 0)
-            .order('name', { ascending: true })
-            .limit(2000);
+        const { data: allMedsRaw } = await _supabase.rpc('get_all_medicines');
+        const activeMeds = (allMedsRaw || []).filter(m => m.qty > 0);
 
         content += `
             ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) ? `
@@ -3239,7 +3231,7 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
     // Medicines + patients lists: 60s cache — only re-fetch if stale
     const LISTS_TTL = 60000;
     if (!_pharmListsMeds || (Date.now() - _pharmListsMedTs) > LISTS_TTL) {
-        const { data } = await _supabase.from('medicines').select('id, name, batch, expiry_date').order('name', { ascending: true }).limit(1000);
+        const { data } = await _supabase.rpc('get_all_medicines');
         _pharmListsMeds  = data;
         _pharmListsMedTs = Date.now();
     }
@@ -4489,14 +4481,10 @@ window.exportToExcel = async function (tableId, fileName) {
     if (tableId === 'records-table' || tableId === 'my-register-table') {
         window.showToast("Préparation de l'exportation complète...", "info");
         try {
-            let query = _supabase.from('dispensations').select('date, patient_name, medicine_name, qty, pharmacy_id, dispensed_by, reference').order('date', { ascending: false }).limit(50000);
-
-            if (tableId === 'my-register-table') {
-                const pharmId = window.preSelectedPharm || (currentUser && currentUser.pharmacyId);
-                if (pharmId) query = query.eq('pharmacy_id', pharmId);
-            }
-
-            const { data, error } = await query;
+            const pharmId = (tableId === 'my-register-table')
+                ? (window.preSelectedPharm || (currentUser && currentUser.pharmacyId) || null)
+                : null;
+            const { data, error } = await _supabase.rpc('get_all_dispensations', { p_pharmacy_id: pharmId });
             if (error) throw error;
 
             const exportData = data.map(d => ({
