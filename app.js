@@ -2630,11 +2630,8 @@ window.renderView = async function (viewName) {
         else if (timeframe === 'year') startDate.setFullYear(startDate.getFullYear() - 1); // Show last year
 
         const isoStart = startDate.toISOString().split('T')[0];
-        // SCALABILITY: Fetch a larger batch for analytics (up to 10,000 records)
-        const { data: reportData } = await _supabase.from('dispensations')
-            .select('date, pharmacy_id, medicine_name, patient_name, qty')
-            .gte('date', isoStart)
-            .limit(10000);
+        // RPC contourne la limite max-rows de PostgREST (1000 lignes par défaut)
+        const { data: reportData } = await _supabase.rpc('get_analytics_dispensations', { p_start: isoStart });
         const dispensations = reportData || [];
 
         // Grouping 1 (By Pharmacy)
