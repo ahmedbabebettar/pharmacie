@@ -1074,8 +1074,9 @@ window.exportPharmacyStockToExcel = async function (pharmId) {
         .from('pharmacy_stock')
         .select('qty, medicines(name, batch, expiry_date, entry_date, price)')
         .eq('pharmacy_id', pharmId)
-        .gt('qty', 0)
-        .order('medicines(name)', { ascending: true });
+        .gt('qty', 0);
+
+    if (data) data.sort((a, b) => (a.medicines?.name || '').localeCompare(b.medicines?.name || ''));
 
     if (error || !data || data.length === 0) {
         window.showToast('Stock vide ou erreur.', 'error');
