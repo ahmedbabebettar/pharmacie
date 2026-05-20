@@ -1066,6 +1066,44 @@ window.exportCentralStockToExcel = async function () {
     window.showToast(currentLang === 'ar' ? 'تم تصدير ملف Excel بنجاح!' : "Export Excel réussi !");
 };
 
+window.exportPharmacyStockToExcel = async function (pharmId) {
+    window.showToast("Préparation du fichier Excel...", "info");
+    const pharmName = state.pharmacies[pharmId]?.name?.fr || ('Pharmacie_' + pharmId);
+
+    const { data, error } = await _supabase
+        .from('pharmacy_stock')
+        .select('qty, medicines(name, batch, expiry_date, entry_date, price)')
+        .eq('pharmacy_id', pharmId)
+        .gt('qty', 0)
+        .order('medicines(name)', { ascending: true });
+
+    if (error || !data || data.length === 0) {
+        window.showToast('Stock vide ou erreur.', 'error');
+        return;
+    }
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    const dataToExport = data.map(row => {
+        const m = row.medicines || {};
+        const qty = row.qty;
+        return {
+            'Médicament': m.name || '-',
+            'Lot': m.batch || '-',
+            'Quantité': qty,
+            'Statut': qty === 0 ? 'Rupture' : qty < 50 ? 'Faible' : 'Bon',
+            'Date d\'expiration': m.expiry_date ? m.expiry_date.substring(0, 10) : '-',
+            'Date d\'entrée': m.entry_date ? m.entry_date.substring(0, 10) : '-'
+        };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    ws['!cols'] = [{ wch: 35 }, { wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Stock');
+    XLSX.writeFile(wb, `Stock_${pharmName.replace(/\s+/g, '_')}_${dateStr}.xlsx`);
+    window.showToast('Export Excel réussi !');
+};
+
 const viewContainer = document.getElementById('view-container');
 const pageTitle = document.getElementById('page-title');
 const navButtons = document.querySelectorAll('.nav-btn');
@@ -3284,6 +3322,9 @@ window.renderPharmacy = async function (pharmId, subView = 'all') {
                         <span>${pStockState.total} articles affichés</span>
                         <button class="icon-btn" style="color:var(--primary-brand); font-size:14px;" onclick="window.renderPharmacy(${pharmId}, 'all')" title="Actualiser">
                             <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                        <button class="icon-btn" style="color:#059669; font-size:14px;" onclick="window.exportPharmacyStockToExcel(${pharmId})" title="Exporter Excel">
+                            <i class="fa-solid fa-file-excel"></i>
                         </button>
                         ${isFullAdmin ? `
                         <button class="icon-btn" style="color:#7c3aed; font-size:14px;" onclick="window.consolidatePharmacyStock(${pharmId})" title="Consolider ودمج المكررات">
